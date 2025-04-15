@@ -14,12 +14,14 @@ datasource db {
 }
 
 model Product {
-  id        Int    @id @default(autoincrement())
-  name      String @unique
+  id        Int      @id @default(autoincrement())
+  name      String
   price     String
   store     String
   category  String
   image     String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@unique([name, store], name: "name_store")
 }
