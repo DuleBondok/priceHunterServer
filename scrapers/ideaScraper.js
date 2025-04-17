@@ -1,13 +1,13 @@
     const puppeteer = require('puppeteer');
 
-    async function scrapeProducts(url) {
+    async function scrapeIdeaProducts(url) {
         const browser = await puppeteer.launch({ headless: true });
         const page = await browser.newPage();
     
         let allProducts = [];
         let pageNum = 1;
         const MAX_PAGES = 10;
-        const lastPageProductNames = new Set(); // Set to track product names
+        const lastPageProductNames = new Set();
     
         while (pageNum <= MAX_PAGES) {
             const currentUrl = `${url}?page=${pageNum}`;
@@ -17,7 +17,6 @@
                 await page.goto(currentUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
                 await page.waitForSelector('.inner-proizvod', { visible: true });
     
-                // Scraping products here
                 const products = await page.evaluate(() => {
                     const data = [];
                     const productElements = document.querySelectorAll('.inner-proizvod');
@@ -119,7 +118,7 @@
     const allProducts = [];
 
     for (const url of urls) {
-        const products = await scrapeProducts(url);
+        const products = await scrapeIdeaProducts(url);
         allProducts.push(...products);
     }
 
@@ -127,4 +126,4 @@
     return allProducts;
     }
 
-    module.exports = { scrapeProducts, scrapeMultipleCategories };
+    module.exports = { scrapeIdeaProducts, scrapeMultipleCategories };

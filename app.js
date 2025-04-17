@@ -6,6 +6,7 @@ const puppeteer = require("puppeteer");
 const { scrapeMultipleCategories } = require("./scrapers/ideaScraper");
 const scrapeMaxi = require('./scrapers/maxiScraper');
 const { saveProducts } = require('./productService');
+const scrapeDisProducts = require('./scrapers/disScraper');
 
 
 const app = express();
@@ -64,6 +65,16 @@ app.get("/api/scrape-maxi", async (req, res) => {
     res.json(products);
   } catch (error) {
     res.status(500).send("Failed to scrape Maxi data");
+  }
+});
+
+app.get("/api/scrape-dis", async (req, res) => {
+  try {
+      const products = await scrapeDisProducts();
+      res.json(products); // Send products as JSON response
+  } catch (error) {
+      console.error("Error during scraping:", error);
+      res.status(500).json({ error: "Scraping failed" });
   }
 });
 
