@@ -16,5 +16,10 @@
     "express": "^5.1.0",
     "prisma": "^6.6.0",
     "puppeteer": "^24.6.1"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.1",
+    "typescript": "^5.8.3"
   }
 }

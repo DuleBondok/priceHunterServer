@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "module": "commonjs",
+    "target": "es6",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "allowJs": false  // Make sure allowJs is set to false since we're using TS files now
+  },
+  "include": [
+    "src/**/*",  // Adjust this if your files are elsewhere
+    "prismaClient.ts"  // Explicitly include prismaClient.ts
+  ]
+}

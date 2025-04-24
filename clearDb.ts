@@ -1,4 +1,4 @@
-const prisma = require('./prismaClient'); // Import Prisma Client
+import prisma from './prismaClient';
 
 async function clearDatabase() {
   try {
@@ -7,8 +7,9 @@ async function clearDatabase() {
     await prisma.$executeRaw`ALTER SEQUENCE "Product_id_seq" RESTART WITH 1;`;
 
     console.log('Database cleared successfully');
-  } catch (error) {
-    console.error('Error clearing database:', error.message);
+  } catch (error: unknown) {
+    const err = error as Error;
+    console.error('Error clearing database:', err.message);
   } finally {
     await prisma.$disconnect();
   }

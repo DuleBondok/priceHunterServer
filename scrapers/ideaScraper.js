@@ -55,25 +55,25 @@
     
                 if (products.length === 0) {
                     console.log(`No products found on page ${pageNum}. Stopping scrape...`);
-                    break; // No products found, stop scraping this category
+                    break;
                 }
     
-                // Check if the products are unique compared to the last page
+                
                 const currentPageProductNames = new Set(products.map(p => p.name));
                 if ([...currentPageProductNames].every(name => lastPageProductNames.has(name))) {
                     console.log(`Same products detected on page ${pageNum}. Stopping scrape...`);
-                    break; // Same products as the previous page
+                    break;
                 }
     
-                // Add the products from the current page to the results
+                
                 allProducts.push(...products);
-                currentPageProductNames.forEach(name => lastPageProductNames.add(name)); // Add current page products to the set
+                currentPageProductNames.forEach(name => lastPageProductNames.add(name));
     
-                pageNum++; // Move to the next page
+                pageNum++;
     
             } catch (error) {
                 console.error(`Error scraping page ${currentUrl}:`, error);
-                break; // Stop if there's an error
+                break;
             }
         }
     

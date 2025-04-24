@@ -1,6 +1,6 @@
-const prisma = require('./prismaClient');  // Import the Prisma instance
+import prisma from './prismaClient';
 
-// Function to create a new product
+
 async function createProduct(productData) {
     try {
         await prisma.product.upsert({
@@ -29,7 +29,6 @@ async function createProduct(productData) {
     }
 }
 
-// Main function to save all products
 async function saveProducts(products) {
     let createdCount = 0;
     let updatedCount = 0;
@@ -86,4 +85,4 @@ async function saveProducts(products) {
     };
 }
 
-module.exports = { saveProducts };
+export default saveProducts;
