@@ -1,4 +1,6 @@
 import puppeteer, {Browser, Page} from "puppeteer";
+import prisma from '../prismaClient';
+import saveProducts, { createProduct } from '../productService';
 
 interface Product {
   name:string;
@@ -76,6 +78,17 @@ async function scrapeDisProducts(
         allProducts = [...allProducts, ...currentProducts];
         console.log(`Found ${currentProducts.length} filtered products on page ${pageNum}`);
         previousPageProducts = currentProducts;
+
+        const productData = currentProducts.map((product) => ({
+          name: product.name,
+          price: product.price,
+          image: product.image || '', // Default to an empty string if image is null
+          store: 'DIS', // Store name
+          category: 'Groceries', // Category you want to assign
+        }));
+
+        const saveResult = await saveProducts(productData);
+        console.log(`Saved products on page ${pageNum}:`, saveResult);
 
         
         const nextButtons = await page.$$('button.flex.flex-row.items-center');

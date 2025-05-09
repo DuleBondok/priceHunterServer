@@ -1,10 +1,18 @@
-const puppeteer = require('puppeteer');
-const prisma = require('../prismaClient');  // Import Prisma instance directly
+import puppeteer from "puppeteer";
+import prisma from '../prismaClient';
 
-// Function to save the products to the database (specifically for Maxi scraper)
-async function saveProduct(productData) {
+interface Product {
+  name:string;
+  price:string;
+  store:string;
+  category:string;
+  image:string;
+}
+
+
+async function saveProduct(productData: Product):Promise<void> {
     try {
-      // Check if the product already exists
+      
       const existingProduct = await prisma.product.findUnique({
         where: {
           name_store: {
@@ -15,7 +23,7 @@ async function saveProduct(productData) {
       });
   
       if (existingProduct) {
-        // If the product exists, you can update it if needed
+        
         console.log('Product already exists, updating...');
         await prisma.product.update({
             where: {
@@ -25,12 +33,12 @@ async function saveProduct(productData) {
               }
             },
           data: {
-            price: productData.price, // Example field to update
-            // Update other fields as needed
+            price: productData.price,
+            
           }
         });
       } else {
-        // If the product doesn't exist, create it
+        
         console.log('Creating new product...');
         await prisma.product.create({
           data: productData
@@ -41,13 +49,13 @@ async function saveProduct(productData) {
     }
   }
 
-async function scrapeMaxi() {
+async function scrapeMaxi():Promise<Product[]> {
   try {
-    const browser = await puppeteer.launch({ headless: 'new' });
+    const browser = await puppeteer.launch({ headless: true });
     const page = await browser.newPage();
 
     let currentPage = 1;
-    const uniqueItemsMap = new Map();
+    const uniqueItemsMap = new Map<string, Product>();
 
     while (true) {
       const url = `https://www.maxi.rs/Mlechni-proizvodi-i-jaja/c/02?q=%3Arelevance&sort=relevance&pageNumber=${currentPage}`;
@@ -56,25 +64,25 @@ async function scrapeMaxi() {
 
       await new Promise((resolve) => setTimeout(resolve, 1500));
 
-      const items = await page.evaluate(() => {
-        const products = [];
+      const items: Product[] = await page.evaluate(() => {
+        const products:Product[] = [];
 
         document.querySelectorAll('[data-testid="product-tile-footer"]').forEach((footer) => {
-          const tile = footer.closest('[data-testid="product-tile-footer"]')?.parentElement;
-          const nameLink = tile?.querySelector('[data-testid="product-block-name-link"]');
-          const brand = nameLink?.querySelector('[data-testid="product-brand"]')?.innerText.trim() || '';
-          const name = nameLink?.querySelector('[data-testid="product-name"]')?.innerText.trim() || '';
+          const tile = footer.closest('[data-testid="product-tile-footer"]')?.parentElement as HTMLElement | null;
+          const nameLink = tile?.querySelector('[data-testid="product-block-name-link"]') as HTMLElement | null;
+          const brand = nameLink?.querySelector('[data-testid="product-brand"]')?.textContent?.trim() || '';
+          const name = nameLink?.querySelector('[data-testid="product-name"]')?.textContent?.trim() || '';
           const fullName = `${brand} ${name}`.trim();
 
           const priceContainer = tile?.querySelector('[data-testid="product-block-price"]');
-          const whole = priceContainer?.querySelector('.sc-dqia0p-9')?.innerText.trim() || '';
-          const decimal = priceContainer?.querySelector('.sc-dqia0p-10')?.innerText.trim() || '';
-          const currency = priceContainer?.querySelector('.sc-dqia0p-8')?.innerText.trim() || '';
+          const whole = priceContainer?.querySelector('.sc-dqia0p-9')?.textContent?.trim() || '';
+          const decimal = priceContainer?.querySelector('.sc-dqia0p-10')?.textContent?.trim() || '';
+          const currency = priceContainer?.querySelector('.sc-dqia0p-8')?.textContent?.trim() || '';
 
           const price = whole ? `${whole}.${decimal} ${currency}` : 'N/A';
 
-          const imageEl = tile?.querySelector('img[data-testid="product-block-image"]');
-          let imageUrl = imageEl ? imageEl.getAttribute("src") : '';
+          const imageEl = tile?.querySelector('img[data-testid="product-block-image"]') as HTMLElement | null;
+          let imageUrl = imageEl ? imageEl.getAttribute("src") || '' : '';
 
           if (imageUrl && !imageUrl.startsWith('http')) {
             imageUrl = `https://www.maxi.rs${imageUrl}`;
@@ -85,7 +93,7 @@ async function scrapeMaxi() {
               name: fullName,
               price,
               store: "Maxi",
-              category: "Milk and egg products", // Align category
+              category: "Milk and egg products",
               image: imageUrl
             });
           }
@@ -108,27 +116,18 @@ async function scrapeMaxi() {
     }
 
     const allItems = Array.from(uniqueItemsMap.values());
-    const totalProducts = allItems.length;
+    console.log(`Total unique products: ${allItems.length}`);
 
-    console.log(`Total unique products: ${totalProducts}`);
-
-    // Save the products to the database (using the new saveProduct function)
     for (const product of allItems) {
-      await saveProduct({
-        name: product.name,
-        price: product.price,
-        store: "Maxi",
-        category: "Milk and egg products",  // Align category
-        image: product.image,
-      });
+      await saveProduct(product);
     }
 
     await browser.close();
     return allItems;
-  } catch (error) {
+  } catch (error:any) {
     console.error('Scraping error:', error.message);
     throw new Error('Failed to scrape data');
   }
 }
 
-module.exports = scrapeMaxi;
+export default scrapeMaxi;

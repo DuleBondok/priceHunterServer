@@ -1,13 +1,21 @@
-    const puppeteer = require('puppeteer');
+   import puppeteer from 'puppeteer';
 
-    async function scrapeIdeaProducts(url) {
+   interface Product {
+    name: string;
+    price: string;
+    image: string;
+    store: string;
+    category: string;
+   }
+
+    export async function scrapeIdeaProducts(url:string): Promise<Product[]> {
         const browser = await puppeteer.launch({ headless: true });
         const page = await browser.newPage();
     
-        let allProducts = [];
+        let allProducts: Product[] = [];
         let pageNum = 1;
         const MAX_PAGES = 10;
-        const lastPageProductNames = new Set();
+        const lastPageProductNames = new Set<string>();
     
         while (pageNum <= MAX_PAGES) {
             const currentUrl = `${url}?page=${pageNum}`;
@@ -17,8 +25,8 @@
                 await page.goto(currentUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
                 await page.waitForSelector('.inner-proizvod', { visible: true });
     
-                const products = await page.evaluate(() => {
-                    const data = [];
+                const products: Product[] = await page.evaluate(() => {
+                    const data:Product[] = [];
                     const productElements = document.querySelectorAll('.inner-proizvod');
     
                     productElements.forEach(el => {
@@ -26,17 +34,16 @@
                         const priceElement = el.querySelector('.cijena');
                         const imageElement = el.querySelector('.image img');
     
-                        const title = titleElement ? titleElement.innerText.trim() : null;
-                        let price = priceElement ? priceElement.innerText.trim().replace(/\s+/g, ' ') : null;
-                        const image = imageElement ? imageElement.getAttribute('ng-src') : null;
+                        const title = titleElement?.textContent?.trim() ?? null;
+                        let price = priceElement?.textContent?.trim().replace(/\s+/g, ' ') ?? null;
+                        const image = imageElement?.getAttribute('ng-src') ?? null;
     
                         if (!price) {
                             price = "N/A";
                         } else {
                             price = price.replace(' din/kom', '');
-                            price = parseFloat(price.replace(/\D/g, '')) / 100;
-                            price = price.toFixed(2);
-                            price = `${price} RSD`;
+                            const numericPrice = parseFloat(price.replace(/\D/g, '')) / 100;
+                            price = `${numericPrice.toFixed(2)} RSD`;
                         }
     
                         if (title && price && image) {
@@ -80,8 +87,8 @@
         await browser.close();
         return allProducts;
     }
-    async function scrapeMultipleCategories() {
-    const urls = [
+    export async function scrapeMultipleCategories():Promise<Product[]> {
+    const urls:string[] = [
         'https://online.idea.rs/#!/categories/60016184/cokoladno-mleko/products',
         'https://online.idea.rs/#!/categories/60016182/sveze-mleko/products',
         'https://online.idea.rs/#!/categories/60016183/dugotrajno-mleko/products',
@@ -115,7 +122,7 @@
         
     ];
 
-    const allProducts = [];
+    const allProducts: Product[] = [];
 
     for (const url of urls) {
         const products = await scrapeIdeaProducts(url);
@@ -126,4 +133,4 @@
     return allProducts;
     }
 
-    module.exports = { scrapeIdeaProducts, scrapeMultipleCategories };
+    export default { scrapeIdeaProducts, scrapeMultipleCategories };

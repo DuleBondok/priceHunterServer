@@ -1,7 +1,16 @@
 import prisma from './prismaClient';
 
+type ProductData = {
+    name: string;
+    price: string;
+    image: string;
+    store: string;
+    category: string;
+  };
 
-async function createProduct(productData) {
+
+
+async function createProduct(productData: ProductData) {
     try {
         await prisma.product.upsert({
             where: {
@@ -24,12 +33,16 @@ async function createProduct(productData) {
             }
         });
         console.log(`Product processed successfully: ${productData.name}`);
-    } catch (error) {
-        console.error(`❌ Error processing product: ${error.message}`);
-    }
+    } catch (error: unknown) {
+        if (error instanceof Error) {
+          console.error(`❌ Error processing product: ${error.message}`);
+        } else {
+          console.error('❌ Unknown error processing product:', error);
+        }
+      }
 }
 
-async function saveProducts(products) {
+async function saveProducts(products:ProductData[]) {
     let createdCount = 0;
     let updatedCount = 0;
 
@@ -71,9 +84,13 @@ async function saveProducts(products) {
                 });
                 createdCount++;
             }
-        } catch (err) {
-            console.error(`❌ Error saving product ${product.name}:`, err.message);
-        }
+        } catch (err: unknown) {
+            if (err instanceof Error) {
+              console.error(`❌ Error saving product ${product.name}:`, err.message);
+            } else {
+              console.error(`❌ Unknown error saving product ${product.name}:`, err);
+            }
+          }
     }
 
     const totalInDb = await prisma.product.count();
@@ -81,8 +98,9 @@ async function saveProducts(products) {
     return {
         created: createdCount,
         updated: updatedCount,
-        totalInDb
+        totalInDb,
     };
 }
 
 export default saveProducts;
+export { createProduct, type ProductData };
