@@ -1,94 +1,112 @@
-   import puppeteer from 'puppeteer';
+import puppeteer from 'puppeteer';
 
-   interface Product {
+interface Product {
     name: string;
+    normalizedName: string;
     price: string;
     image: string;
     store: string;
     category: string;
-   }
+}
 
-    export async function scrapeIdeaProducts(url:string): Promise<Product[]> {
-        const browser = await puppeteer.launch({ headless: true });
-        const page = await browser.newPage();
-    
-        let allProducts: Product[] = [];
-        let pageNum = 1;
-        const MAX_PAGES = 10;
-        const lastPageProductNames = new Set<string>();
-    
-        while (pageNum <= MAX_PAGES) {
-            const currentUrl = `${url}?page=${pageNum}`;
-            console.log(`Scraping page: ${currentUrl}`);
-    
-            try {
-                await page.goto(currentUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-                await page.waitForSelector('.inner-proizvod', { visible: true });
-    
-                const products: Product[] = await page.evaluate(() => {
-                    const data:Product[] = [];
-                    const productElements = document.querySelectorAll('.inner-proizvod');
-    
-                    productElements.forEach(el => {
-                        const titleElement = el.querySelector('.ime-proizvoda a');
-                        const priceElement = el.querySelector('.cijena');
-                        const imageElement = el.querySelector('.image img');
-    
-                        const title = titleElement?.textContent?.trim() ?? null;
-                        let price = priceElement?.textContent?.trim().replace(/\s+/g, ' ') ?? null;
-                        const image = imageElement?.getAttribute('ng-src') ?? null;
-    
-                        if (!price) {
-                            price = "N/A";
-                        } else {
-                            price = price.replace(' din/kom', '');
-                            const numericPrice = parseFloat(price.replace(/\D/g, '')) / 100;
-                            price = `${numericPrice.toFixed(2)} RSD`;
-                        }
-    
-                        if (title && price && image) {
-                            data.push({
-                                name: title,
-                                price,
-                                image,
-                                store: "Idea",
-                                category: "Milk and egg products"
-                            });
-                        }
-                    });
-    
-                    return data;
+// Function to normalize the name
+function normalizeName(name: string): string {
+    return name
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9\s]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+export async function scrapeIdeaProducts(url: string): Promise<Product[]> {
+    const browser = await puppeteer.launch({ headless: true });
+    const page = await browser.newPage();
+
+    let allProducts: Product[] = [];
+    let pageNum = 1;
+    const MAX_PAGES = 3;
+
+    // Define the function to pass to browser context
+    const normalizeFunction = `
+        function normalizeName(name) {
+            return name
+                .toLowerCase()
+                .normalize('NFD')
+                .replace(/[\\u0300-\\u036f]/g, '')
+                .replace(/[^a-z0-9\\s]/g, '')
+                .replace(/\\s+/g, ' ')
+                .trim();
+        }
+    `;
+
+    while (pageNum <= MAX_PAGES) {
+        const currentUrl = `${url}?page=${pageNum}`;
+        console.log(`Scraping page: ${currentUrl}`);
+
+        try {
+            await page.goto(currentUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+            await page.waitForSelector('.inner-proizvod', { visible: true });
+
+            // Pass the normalize function to browser context
+            const products: Product[] = await page.evaluate((normalizeFn) => {
+                // Evaluate the function in browser context
+                eval(normalizeFn);
+                
+                const data: Product[] = [];
+                const productElements = document.querySelectorAll('.inner-proizvod');
+
+                productElements.forEach(el => {
+                    const titleElement = el.querySelector('.ime-proizvoda a');
+                    const priceElement = el.querySelector('.cijena');
+                    const imageElement = el.querySelector('.image img');
+
+                    const title = titleElement?.textContent?.trim() ?? '';
+                    let price = priceElement?.textContent?.trim().replace(/\s+/g, ' ') ?? 'N/A';
+                    const image = imageElement?.getAttribute('ng-src') ?? '';
+
+                    if (price !== 'N/A') {
+                        price = price.replace(' din/kom', '');
+                        const numericPrice = parseFloat(price.replace(/\D/g, '')) / 100;
+                        price = `${numericPrice.toFixed(2)} RSD`;
+                    }
+
+                    if (title && price && image) {
+                        data.push({
+                            name: title,
+                            normalizedName: normalizeName(title),
+                            price,
+                            image,
+                            store: "Idea",
+                            category: "Milk and egg products"
+                        });
+                    }
                 });
-    
-                if (products.length === 0) {
-                    console.log(`No products found on page ${pageNum}. Stopping scrape...`);
-                    break;
-                }
-    
-                
-                const currentPageProductNames = new Set(products.map(p => p.name));
-                if ([...currentPageProductNames].every(name => lastPageProductNames.has(name))) {
-                    console.log(`Same products detected on page ${pageNum}. Stopping scrape...`);
-                    break;
-                }
-    
-                
-                allProducts.push(...products);
-                currentPageProductNames.forEach(name => lastPageProductNames.add(name));
-    
-                pageNum++;
-    
-            } catch (error) {
-                console.error(`Error scraping page ${currentUrl}:`, error);
+
+                return data;
+            }, normalizeFunction);  // Pass the function as argument
+
+            if (products.length === 0) {
+                console.log(`No products found on page ${pageNum}. Stopping scrape...`);
                 break;
             }
+
+            allProducts.push(...products);
+            pageNum++;
+
+        } catch (error) {
+            console.error(`Error scraping page ${currentUrl}:`, error);
+            break;
         }
-    
-        await browser.close();
-        return allProducts;
     }
-    export async function scrapeMultipleCategories():Promise<Product[]> {
-    const urls:string[] = [
+
+    await browser.close();
+    return allProducts;
+}
+
+export async function scrapeMultipleCategories(): Promise<Product[]> {
+    const urls: string[] = [
         'https://online.idea.rs/#!/categories/60016184/cokoladno-mleko/products',
         'https://online.idea.rs/#!/categories/60016182/sveze-mleko/products',
         'https://online.idea.rs/#!/categories/60016183/dugotrajno-mleko/products',
@@ -119,18 +137,35 @@
         'https://online.idea.rs/#!/categories/60007830/margarin-i-maslac/products',
         'https://online.idea.rs/#!/categories/60007829/majonez-i-prelivi/products',
         'https://online.idea.rs/#!/categories/60007831/mlecni-dezerti/products',
-        
     ];
 
     const allProducts: Product[] = [];
+    const seenProducts = new Set<string>(); // Track unique products
 
     for (const url of urls) {
-        const products = await scrapeIdeaProducts(url);
-        allProducts.push(...products);
+        try {
+            const products = await scrapeIdeaProducts(url);
+            
+            // Filter out duplicates before adding
+            const uniqueProducts = products.filter(product => {
+                const key = `${product.name}-${product.price}`;
+                if (!seenProducts.has(key)) {
+                    seenProducts.add(key);
+                    return true;
+                }
+                return false;
+            });
+
+            allProducts.push(...uniqueProducts);
+            console.log(`Scraped ${uniqueProducts.length} unique products from ${url}`);
+            
+        } catch (error) {
+            console.error(`Error scraping ${url}:`, error);
+        }
     }
 
-    console.log(`Total products from all categories: ${allProducts.length}`);
+    console.log(`Total unique products from all categories: ${allProducts.length}`);
     return allProducts;
-    }
+}
 
-    export default { scrapeIdeaProducts, scrapeMultipleCategories };
+export default { scrapeIdeaProducts, scrapeMultipleCategories };

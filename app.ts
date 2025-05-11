@@ -8,6 +8,7 @@ import { scrapeMultipleCategories } from "./scrapers/ideaScraper";
 import scrapeMaxi from './scrapers/maxiScraper';
 import saveProducts from './productService';
 import scrapeDisProducts from "./scrapers/disScraper";
+import { clearDatabase } from './clearDb';
 
 
 
@@ -82,6 +83,19 @@ app.get("/api/scrape-dis", async (req: Request, res:Response) => {
       res.status(500).json({ error: "Scraping failed" });
   }
 });
+
+app.delete('/api/clear-db', async (req, res) => {
+  try {
+    await clearDatabase();
+    console.log('✅ Database cleared successfully');
+    res.status(200).json({ success: true, message: 'Database cleared' });
+  } catch (error: unknown) {
+    const err = error as Error;
+    console.error('❌ Error clearing database:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 
 
 const PORT = 5000;

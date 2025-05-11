@@ -1,16 +1,26 @@
-import puppeteer, {Browser, Page} from "puppeteer";
-import prisma from '../prismaClient';
+import puppeteer, { Browser, Page } from "puppeteer";
 import saveProducts, { createProduct } from '../productService';
 
 interface Product {
-  name:string;
+  name: string;
+  normalizedName: string;
   price: string;
   image: string | null;
 }
 
+function normalizeName(name: string): string {
+  return name
+    .toLowerCase()
+    .normalize('NFD') // Decompose accented characters like č → c
+    .replace(/[\u0300-\u036f]/g, '') // Remove diacritics
+    .replace(/[^a-z0-9\s]/g, '') // Remove special characters but keep spaces
+    .replace(/\s+/g, ' ') // Collapse multiple spaces
+    .trim();
+}
+
 async function scrapeDisProducts(
   url: string = "https://www.dis.rs/pretraga?type=artikli&query="
-) : Promise <Product []> {
+): Promise<Product[]> {
   const browser: Browser = await puppeteer.launch({ headless: true });
   const page: Page = await browser.newPage();
 
@@ -60,16 +70,24 @@ async function scrapeDisProducts(
             const price = item.querySelector("p[class*='text-']")?.textContent?.trim() || 'N/A';
             const image = item.querySelector("img")?.getAttribute("srcset") || null;
 
-            return { name, price, image };
+            return { 
+              name, 
+              normalizedName: '', // Placeholder, will be filled below
+              price, 
+              image 
+            };
           }).filter(product => product.name);
         });
 
-       
+        // Add normalized names to products
+        currentProducts.forEach(product => {
+          product.normalizedName = normalizeName(product.name);
+        });
+
         if (pageNum === 1 && currentProducts.length === 0) {
           console.log("Warning: No products found after filtering - check category selection");
         }
 
-        
         if (previousPageProducts && JSON.stringify(currentProducts) === JSON.stringify(previousPageProducts)) {
           console.log("Duplicate products detected - reached end of pagination");
           break;
@@ -79,18 +97,24 @@ async function scrapeDisProducts(
         console.log(`Found ${currentProducts.length} filtered products on page ${pageNum}`);
         previousPageProducts = currentProducts;
 
+        // Log the product data before passing it to saveProducts
+        console.log("Saving the following product data:", currentProducts);
+
         const productData = currentProducts.map((product) => ({
           name: product.name,
+          normalizedName: product.normalizedName,
           price: product.price,
-          image: product.image || '', // Default to an empty string if image is null
-          store: 'DIS', // Store name
-          category: 'Groceries', // Category you want to assign
+          image: product.image || '',
+          store: 'DIS',
+          category: 'Milk and egg products',
         }));
+
+        // Check if productData has data
+        console.log(`Data prepared for saving:`, productData);
 
         const saveResult = await saveProducts(productData);
         console.log(`Saved products on page ${pageNum}:`, saveResult);
 
-        
         const nextButtons = await page.$$('button.flex.flex-row.items-center');
         if (nextButtons.length < 2) {
           console.log("No more pagination buttons found - stopping");

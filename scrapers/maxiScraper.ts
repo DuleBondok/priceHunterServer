@@ -1,61 +1,23 @@
 import puppeteer from "puppeteer";
-import prisma from '../prismaClient';
+import { createProduct, ProductData } from '../productService';
 
-interface Product {
-  name:string;
-  price:string;
-  store:string;
-  category:string;
-  image:string;
+function normalizeName(name: string): string {
+  return name
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9\s]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
-
-async function saveProduct(productData: Product):Promise<void> {
-    try {
-      
-      const existingProduct = await prisma.product.findUnique({
-        where: {
-          name_store: {
-            name: productData.name,
-            store: productData.store,
-          }
-        }
-      });
-  
-      if (existingProduct) {
-        
-        console.log('Product already exists, updating...');
-        await prisma.product.update({
-            where: {
-              name_store: {
-                name: productData.name,
-                store: productData.store
-              }
-            },
-          data: {
-            price: productData.price,
-            
-          }
-        });
-      } else {
-        
-        console.log('Creating new product...');
-        await prisma.product.create({
-          data: productData
-        });
-      }
-    } catch (error) {
-      console.error('Error creating or updating product:', error);
-    }
-  }
-
-async function scrapeMaxi():Promise<Product[]> {
+async function scrapeMaxi(): Promise<ProductData[]> {
   try {
     const browser = await puppeteer.launch({ headless: true });
     const page = await browser.newPage();
 
     let currentPage = 1;
-    const uniqueItemsMap = new Map<string, Product>();
+    const uniqueItemsMap = new Map<string, ProductData>();
 
     while (true) {
       const url = `https://www.maxi.rs/Mlechni-proizvodi-i-jaja/c/02?q=%3Arelevance&sort=relevance&pageNumber=${currentPage}`;
@@ -64,12 +26,12 @@ async function scrapeMaxi():Promise<Product[]> {
 
       await new Promise((resolve) => setTimeout(resolve, 1500));
 
-      const items: Product[] = await page.evaluate(() => {
-        const products:Product[] = [];
+      const items: Omit<ProductData, 'normalizedName'>[] = await page.evaluate(() => {
+        const products: Omit<ProductData, 'normalizedName'>[] = [];
 
         document.querySelectorAll('[data-testid="product-tile-footer"]').forEach((footer) => {
-          const tile = footer.closest('[data-testid="product-tile-footer"]')?.parentElement as HTMLElement | null;
-          const nameLink = tile?.querySelector('[data-testid="product-block-name-link"]') as HTMLElement | null;
+          const tile = footer.closest('[data-testid="product-tile-footer"]')?.parentElement;
+          const nameLink = tile?.querySelector('[data-testid="product-block-name-link"]');
           const brand = nameLink?.querySelector('[data-testid="product-brand"]')?.textContent?.trim() || '';
           const name = nameLink?.querySelector('[data-testid="product-name"]')?.textContent?.trim() || '';
           const fullName = `${brand} ${name}`.trim();
@@ -78,11 +40,10 @@ async function scrapeMaxi():Promise<Product[]> {
           const whole = priceContainer?.querySelector('.sc-dqia0p-9')?.textContent?.trim() || '';
           const decimal = priceContainer?.querySelector('.sc-dqia0p-10')?.textContent?.trim() || '';
           const currency = priceContainer?.querySelector('.sc-dqia0p-8')?.textContent?.trim() || '';
-
           const price = whole ? `${whole}.${decimal} ${currency}` : 'N/A';
 
-          const imageEl = tile?.querySelector('img[data-testid="product-block-image"]') as HTMLElement | null;
-          let imageUrl = imageEl ? imageEl.getAttribute("src") || '' : '';
+          const imageEl = tile?.querySelector('img[data-testid="product-block-image"]');
+          let imageUrl = imageEl?.getAttribute("src") || '';
 
           if (imageUrl && !imageUrl.startsWith('http')) {
             imageUrl = `https://www.maxi.rs${imageUrl}`;
@@ -104,10 +65,15 @@ async function scrapeMaxi():Promise<Product[]> {
 
       if (items.length === 0) break;
 
-      items.forEach((item) => {
+      // Add normalized names and store in map
+      items.forEach(item => {
+        const productWithNormalizedName: ProductData = {
+          ...item,
+          normalizedName: normalizeName(item.name)
+        };
         const key = `${item.name}-${item.price}`;
         if (!uniqueItemsMap.has(key)) {
-          uniqueItemsMap.set(key, item);
+          uniqueItemsMap.set(key, productWithNormalizedName);
         }
       });
 
@@ -118,13 +84,14 @@ async function scrapeMaxi():Promise<Product[]> {
     const allItems = Array.from(uniqueItemsMap.values());
     console.log(`Total unique products: ${allItems.length}`);
 
+    // Use your existing service functions
     for (const product of allItems) {
-      await saveProduct(product);
+      await createProduct(product);
     }
 
     await browser.close();
     return allItems;
-  } catch (error:any) {
+  } catch (error: any) {
     console.error('Scraping error:', error.message);
     throw new Error('Failed to scrape data');
   }
