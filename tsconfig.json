@@ -6,10 +6,24 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
-    "allowJs": false  // Make sure allowJs is set to false since we're using TS files now
+    "allowJs": false // Make sure allowJs is set to false since we're using TS files now
+    ,
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ],
+    "noEmit": true,
+    "incremental": true,
+    "moduleResolution": "node",
+    "isolatedModules": true,
+    "jsx": "preserve"
   },
   "include": [
-    "src/**/*",  // Adjust this if your files are elsewhere
-    "prismaClient.ts"  // Explicitly include prismaClient.ts
+    "src/**/*", // Adjust this if your files are elsewhere
+    "prismaClient.ts" // Explicitly include prismaClient.ts
+  ],
+  "exclude": [
+    "node_modules"
   ]
 }

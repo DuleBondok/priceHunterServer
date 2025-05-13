@@ -13,7 +13,7 @@ function normalizeName(name: string): string {
     .toLowerCase()
     .normalize('NFD') // Decompose accented characters like č → c
     .replace(/[\u0300-\u036f]/g, '') // Remove diacritics
-    .replace(/[^a-z0-9\s]/g, '') // Remove special characters but keep spaces
+    .replace(/[^a-z0-9\s,\.l%]/g, '') 
     .replace(/\s+/g, ' ') // Collapse multiple spaces
     .trim();
 }
