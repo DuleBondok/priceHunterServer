@@ -2,7 +2,6 @@ import prisma from './prismaClient';
 
 type ProductData = {
     name: string;
-    normalizedName: string;
     price: string;
     image: string;
     store: string;
@@ -24,15 +23,13 @@ async function createProduct(productData: ProductData) {
                 price: productData.price,
                 image: productData.image,
                 category: productData.category,
-                normalizedName: productData.normalizedName
             },
             create: {
                 name: productData.name,
-                normalizedName: productData.normalizedName,
                 price: productData.price,
                 image: productData.image,
                 store: productData.store,
-                category: productData.category
+                category: productData.category,
             }
         });
         console.log(`Product processed successfully: ${productData.name}`);
@@ -72,7 +69,6 @@ async function saveProducts(products:ProductData[]) {
                         price: product.price,
                         image: product.image,
                         category: product.category,
-                        normalizedName: product.normalizedName
                     }
                 });
                 updatedCount++;
@@ -80,11 +76,10 @@ async function saveProducts(products:ProductData[]) {
                 await prisma.product.create({
                     data: {
                         name: product.name,
-                        normalizedName: product.normalizedName,
                         price: product.price,
                         image: product.image,
                         store: product.store,
-                        category: product.category
+                        category: product.category,
                     }
                 });
                 createdCount++;

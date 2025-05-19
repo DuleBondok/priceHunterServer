@@ -1,16 +1,6 @@
 import puppeteer from "puppeteer";
 import { createProduct, ProductData } from '../productService';
 
-function normalizeName(name: string): string {
-  return name
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-z0-9\s,\.l%]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
 async function scrapeMaxi(): Promise<ProductData[]> {
   try {
     const browser = await puppeteer.launch({ headless: true });
@@ -26,8 +16,8 @@ async function scrapeMaxi(): Promise<ProductData[]> {
 
       await new Promise((resolve) => setTimeout(resolve, 1500));
 
-      const items: Omit<ProductData, 'normalizedName'>[] = await page.evaluate(() => {
-        const products: Omit<ProductData, 'normalizedName'>[] = [];
+      const items: ProductData[] = await page.evaluate(() => {
+        const products: ProductData[] = [];
 
         document.querySelectorAll('[data-testid="product-tile-footer"]').forEach((footer) => {
           const tile = footer.closest('[data-testid="product-tile-footer"]')?.parentElement;
@@ -65,15 +55,11 @@ async function scrapeMaxi(): Promise<ProductData[]> {
 
       if (items.length === 0) break;
 
-      // Add normalized names and store in map
+      // Store only unique items in map
       items.forEach(item => {
-        const productWithNormalizedName: ProductData = {
-          ...item,
-          normalizedName: normalizeName(item.name)
-        };
         const key = `${item.name}-${item.price}`;
         if (!uniqueItemsMap.has(key)) {
-          uniqueItemsMap.set(key, productWithNormalizedName);
+          uniqueItemsMap.set(key, item);
         }
       });
 
@@ -84,7 +70,7 @@ async function scrapeMaxi(): Promise<ProductData[]> {
     const allItems = Array.from(uniqueItemsMap.values());
     console.log(`Total unique products: ${allItems.length}`);
 
-    // Use your existing service functions
+    // Use your existing service function
     for (const product of allItems) {
       await createProduct(product);
     }

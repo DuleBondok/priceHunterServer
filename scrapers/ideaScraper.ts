@@ -2,23 +2,12 @@ import puppeteer from 'puppeteer';
 
 interface Product {
     name: string;
-    normalizedName: string;
     price: string;
     image: string;
     store: string;
     category: string;
 }
 
-// Function to normalize the name
-function normalizeName(name: string): string {
-    return name
-        .toLowerCase()
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .replace(/[^a-z0-9\s,\.l%]/g, '')
-        .replace(/\s+/g, ' ')
-        .trim();
-}
 
 export async function scrapeIdeaProducts(url: string): Promise<Product[]> {
     const browser = await puppeteer.launch({ headless: true });
@@ -28,18 +17,6 @@ export async function scrapeIdeaProducts(url: string): Promise<Product[]> {
     let pageNum = 1;
     const MAX_PAGES = 3;
 
-    // Define the function to pass to browser context
-    const normalizeFunction = `
-        function normalizeName(name) {
-            return name
-                .toLowerCase()
-                .normalize('NFD')
-                .replace(/[\\u0300-\\u036f]/g, '')
-                .replace(/[^a-z0-9\\s]/g, '')
-                .replace(/\\s+/g, ' ')
-                .trim();
-        }
-    `;
 
     while (pageNum <= MAX_PAGES) {
         const currentUrl = `${url}?page=${pageNum}`;
@@ -50,9 +27,7 @@ export async function scrapeIdeaProducts(url: string): Promise<Product[]> {
             await page.waitForSelector('.inner-proizvod', { visible: true });
 
             // Pass the normalize function to browser context
-            const products: Product[] = await page.evaluate((normalizeFn) => {
-                // Evaluate the function in browser context
-                eval(normalizeFn);
+            const products: Product[] = await page.evaluate(() => {
                 
                 const data: Product[] = [];
                 const productElements = document.querySelectorAll('.inner-proizvod');
@@ -75,7 +50,6 @@ export async function scrapeIdeaProducts(url: string): Promise<Product[]> {
                     if (title && price && image) {
                         data.push({
                             name: title,
-                            normalizedName: normalizeName(title),
                             price,
                             image,
                             store: "Idea",
@@ -85,7 +59,7 @@ export async function scrapeIdeaProducts(url: string): Promise<Product[]> {
                 });
 
                 return data;
-            }, normalizeFunction);  // Pass the function as argument
+            });
 
             if (products.length === 0) {
                 console.log(`No products found on page ${pageNum}. Stopping scrape...`);

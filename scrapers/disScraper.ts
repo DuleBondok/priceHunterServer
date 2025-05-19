@@ -3,19 +3,9 @@ import saveProducts, { createProduct } from '../productService';
 
 interface Product {
   name: string;
-  normalizedName: string;
   price: string;
   image: string | null;
-}
-
-function normalizeName(name: string): string {
-  return name
-    .toLowerCase()
-    .normalize('NFD') // Decompose accented characters like č → c
-    .replace(/[\u0300-\u036f]/g, '') // Remove diacritics
-    .replace(/[^a-z0-9\s,\.l%]/g, '') 
-    .replace(/\s+/g, ' ') // Collapse multiple spaces
-    .trim();
+  normalizedName?: string;
 }
 
 async function scrapeDisProducts(
@@ -67,12 +57,11 @@ async function scrapeDisProducts(
         const currentProducts: Product[] = await page.evaluate(() => {
           return Array.from(document.querySelectorAll('a[href ^="/artikli/"]')).map(item => {
             const name = item.querySelector("p.font-bold.text-black")?.textContent?.trim() || '';
-            const price = item.querySelector("p[class*='text-']")?.textContent?.trim() || 'N/A';
+            const price = item.querySelector("p.font-roboto-slab.font-bold.text-\\[28px\\]")?.textContent?.trim() || 'N/A';
             const image = item.querySelector("img")?.getAttribute("srcset") || null;
 
             return { 
               name, 
-              normalizedName: '', // Placeholder, will be filled below
               price, 
               image 
             };
@@ -80,9 +69,6 @@ async function scrapeDisProducts(
         });
 
         // Add normalized names to products
-        currentProducts.forEach(product => {
-          product.normalizedName = normalizeName(product.name);
-        });
 
         if (pageNum === 1 && currentProducts.length === 0) {
           console.log("Warning: No products found after filtering - check category selection");
@@ -102,7 +88,6 @@ async function scrapeDisProducts(
 
         const productData = currentProducts.map((product) => ({
           name: product.name,
-          normalizedName: product.normalizedName,
           price: product.price,
           image: product.image || '',
           store: 'DIS',
