@@ -18,11 +18,13 @@
     "prisma": "^6.6.0",
     "puppeteer": "^24.6.1",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "string-similarity": "^4.0.4"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.1",
+    "@types/string-similarity": "^4.0.2",
     "typescript": "^5.8.3"
   }
 }

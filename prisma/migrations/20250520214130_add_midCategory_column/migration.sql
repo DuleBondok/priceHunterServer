@@ -1,0 +1,1 @@
+ALTER TABLE "StandardizedProduct" ADD COLUMN "midCategory" VARCHAR(255);
