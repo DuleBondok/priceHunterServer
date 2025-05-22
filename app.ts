@@ -10,6 +10,7 @@ import saveProducts from './productService';
 import scrapeDisProducts from "./scrapers/disScraper";
 import { clearDatabase } from './clearDb';
 import searchRoute from './searchLogic';
+import { getProductMatches } from "./testMatching";
 
 
 
@@ -97,7 +98,35 @@ app.delete('/api/clear-db', async (req, res) => {
   }
 });
 
+app.get('/matches', async (req, res) => {
+  try {
+    const matches = await getProductMatches();
+    res.json(matches);
+  } catch (error) {
+    console.error('Error getting matches:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+app.post('/confirm-match', async (req, res) => {
+  const { productId, standardizedProductId } = req.body;
+  if (!productId || !standardizedProductId) {
+    res.status(400).json({ error: 'Missing productId or standardizedProductId' });
+    return;
+  }
+
+  try {
+    await prisma.product.update({ where:{id:productId}, data:{standardizedProductId} });
+    // no return of res.json here:
+    res.json({ message: 'Match confirmed.' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal error' });
+  }
+});
+
 app.use('/api/search', searchRoute);
+
 
 const PORT = 5000;
 app.listen(PORT, () => console.log(`Server running on Port ${PORT}`));

@@ -17,6 +17,8 @@
     "next": "^15.3.2",
     "prisma": "^6.6.0",
     "puppeteer": "^24.6.1",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "string-similarity": "^4.0.4"
