@@ -10,6 +10,7 @@ interface standardizedProduct {
   mainCategory: string;
   midCategory: string;
   subCategory: string;
+  image: string;
   brand: string;
   volume: string;
 }
@@ -22,6 +23,7 @@ async function saveProducts(products: standardizedProduct[]) {
         mainCategory: product.mainCategory,
         midCategory: product.midCategory,
         subCategory: product.subCategory,
+        image: product.image,
         brand: product.brand,
         volume: product.volume,
       }
@@ -54,16 +56,89 @@ function extractVolumeFromName(name: string): string | null {
 // Brand keyword mapping
 const brandMap: Record<string, string> = {
   Zdravo: "Mlekara Subotica",
+  "Mlekara Šabac": "Mlekara Šabac",
+  "Mlekara Subotica": "Mlekara Subotica",
+  Biser: "Biser",
+  Vindija: "Vindija",
+  "Mama's Toast": "Mama's Toast",
+  Paladin: "Paladin",
+  "Mlekovita": "Mlekovita",
+  Casttelo: "Casttelo",
+  Zanetti: "Zanetti",
+  Galbani: "Galbani",
+  Arla: "Arla",
+  "V gusto": "Gusto Dairy",
+  Frico: "Frico",
+  "Ille De France": "Ile De France",
+  "Mama's Pizza": "Mama's Pizza",
+  Capone: "Capone",
+  Viofast: "Viofast",
+  "Ile De France":"Ile De France",
+  Perffeta: "Biser",
+  Alambra: "Alambra",
+  Pastir: "Pastir",
+  Rougette: "Rougette",
+  "Gusto Dairy": "Gusto Dairy",
+  "Olimp Ex": "Olimp Ex",
+  Korab: "Korab Trnica",
+  President: "President",
+  "CARPE DIEM": "Carpe Diem",
+  Yomleko: "YoMleko",
   Imlek: "Imlek",
   Dukat: "Dukat",
+  Dukatos: "Dukat",
+  "Vegan Gourmet": "Gusto Dairy",
+  "Happy Cow": "Happy Cow",
+  "Farma Parnasos": "Farma Parnasos",
+  Violife: "Violife",
+  Hofmeister: "Hofmeister",
+  Dorblu: "Dorblu",
+  Belje: "Belje",
+  Kasereim:"Kaserei Champignon",
+  Trevalli: "Trevalli",
+  "Green Vie": "Green Vie",
+  Biraghi: "Biraghi",
+  "Vasa Mlekara": "Vaša Mlekara",
+  "PK Zlatibor": "PK Zlatibor",
+  Corpezza: "Corpezza",
+  "Le Rustique": "Le Rustique",
+  Lovilio: "Lovilio",
+  Milbona: "Milbona",
+  Bluedino: "Bluedino",
+  Corp: "Corp",
   Zottis: "Zott",
   Zott: "Zott",
-  "Dr. Milk": "Dr Milk",
+  "DR.MILK": "Dr Milk",
   Meggle: "Meggle",
   Grekos: "Imlek",
   Fruttis: "Fruttis",
   DAR: "DAR",
-  JOTOGO: "JoToGo"
+  JOTOGO: "JoToGo",
+  "Balans+":"Imlek",
+  Granice: "Mlekara Granice",
+  "Zapis Tare": "Zapis Tare",
+  Premia: "Maxi",
+  "K Plus": "K Plus",
+  UMK:"UMK",
+  "Nature's Promise": "Nature's Promise",
+  Dobro: "Dobro",
+  Biomlek: "Biomlek",
+  Pilos: "Pilos",
+  "Select Milk": "Select Milk",
+  "Lučar" : "Lučar",
+  Olympus: "Olympus",
+  Jager: "Jager",
+  "Mlekara Homolje": "Mlekara Homolje",
+  Dodoni: "Dodoni",
+  "Z'Bregov": "Z Bregov",
+  "MULLER": "Muller",
+  "Mlekara Pančevo": "Mlekara Pančevo",
+  Bergarder: "Bergarder",
+  "Lazar Blace": "Mlekara Lazar Blace",
+  Steffel: "Steffel",
+  Yayla: "Yayla",
+  Kolios: "Kolios",
+  Leerdammer: "Leerdammer",
 };
 
 
@@ -92,7 +167,10 @@ async function scrapeCentotekaProducts(url: string): Promise<standardizedProduct
     nodes => nodes.map(node => {
       const nameElement = node.querySelector(".product_info.text-center.pt-2.pb-4 a");
       const name = nameElement?.textContent?.trim() || '';
-      return { name };
+
+      const imgElement = node.querySelector("img");
+      const image = imgElement ? 'https://www.cenoteka.rs' + imgElement.getAttribute("src") : '';
+      return { name, image };
     })
   );
 
@@ -116,10 +194,11 @@ async function scrapeCentotekaProducts(url: string): Promise<standardizedProduct
     return {
       name: name,
       mainCategory: "Mlečni proizvodi i jaja",
-      midCategory: "Kiselo-mlečni proizvodi",
-      subCategory: "Voćni jogurt",
+      midCategory: "Sir",
+      subCategory: "Rendani sir",
       brand,
       volume,
+      image: p.image,
     };
   });
 
@@ -128,7 +207,7 @@ async function scrapeCentotekaProducts(url: string): Promise<standardizedProduct
 }
 
 // Example usage
-scrapeCentotekaProducts("https://cenoteka.rs/vocni-jogurt/").then(async (products) => {
+scrapeCentotekaProducts("https://cenoteka.rs/rendani-sir/p/2/").then(async (products) => {
   console.log(products);
   await saveProducts(products);
   console.log("Products saved to DB");
