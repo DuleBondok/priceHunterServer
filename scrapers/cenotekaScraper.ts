@@ -139,6 +139,20 @@ const brandMap: Record<string, string> = {
   Yayla: "Yayla",
   Kolios: "Kolios",
   Leerdammer: "Leerdammer",
+  Castello: "Castello",
+  Snack: "Hofmeister",
+  Sirko: "Mlekara Šabac",
+  Abc: "ABC",
+  Kremsi: "Mlekara Subotica",
+  Lurpak: "Lurpak",
+  Dijamant: "Dijamant",
+  Vital: "Vital",
+  Polimark: "Polimark",
+  Halta: "Halta",
+  Puddis: "Campina",
+  Neoburger: "Neoburger",
+  "Dr.Oetker": "Dr. Oetker",
+
 };
 
 
@@ -194,8 +208,8 @@ async function scrapeCentotekaProducts(url: string): Promise<standardizedProduct
     return {
       name: name,
       mainCategory: "Mlečni proizvodi i jaja",
-      midCategory: "Sir",
-      subCategory: "Rendani sir",
+      midCategory: "Deserti",
+      subCategory: "Sutlijaš",
       brand,
       volume,
       image: p.image,
@@ -207,7 +221,7 @@ async function scrapeCentotekaProducts(url: string): Promise<standardizedProduct
 }
 
 // Example usage
-scrapeCentotekaProducts("https://cenoteka.rs/rendani-sir/p/2/").then(async (products) => {
+scrapeCentotekaProducts("https://cenoteka.rs/sutlijas/").then(async (products) => {
   console.log(products);
   await saveProducts(products);
   console.log("Products saved to DB");

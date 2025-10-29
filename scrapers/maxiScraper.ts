@@ -27,10 +27,19 @@ async function scrapeMaxi(): Promise<ProductData[]> {
           const fullName = `${brand} ${name}`.trim();
 
           const priceContainer = tile?.querySelector('[data-testid="product-block-price"]');
-          const whole = priceContainer?.querySelector('.sc-dqia0p-9')?.textContent?.trim() || '';
-          const decimal = priceContainer?.querySelector('.sc-dqia0p-10')?.textContent?.trim() || '';
-          const currency = priceContainer?.querySelector('.sc-dqia0p-8')?.textContent?.trim() || '';
-          const price = whole ? `${whole}.${decimal} ${currency}` : 'N/A';
+
+          let whole = priceContainer?.querySelector('.sc-dqia0p-8')?.textContent?.trim() || '';
+          let decimal = priceContainer?.querySelector('.sc-dqia0p-9')?.textContent?.trim() || '';
+          const currency = priceContainer?.querySelector('.sc-dqia0p-7')?.textContent?.trim() || '';
+
+          whole = whole.replace(/\D/g, '');
+          decimal = decimal.replace(/\D/g, '');
+
+          let price = 'N/A';
+          if (whole) {
+            const numericPrice = parseFloat(`${whole}.${decimal || '00'}`);
+            price = `${numericPrice.toFixed(2)} ${currency}`;
+          }
 
           const imageEl = tile?.querySelector('img[data-testid="product-block-image"]');
           let imageUrl = imageEl?.getAttribute("src") || '';
