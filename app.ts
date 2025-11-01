@@ -125,6 +125,38 @@ app.post('/confirm-match', async (req, res) => {
   }
 });
 
+app.get("/api/products/:category", async (req: Request, res: Response): Promise<void> => {
+  const { category } = req.params;
+
+  try {
+    const products = await prisma.standardizedProduct.findMany({
+  where: {
+    mainCategory: {
+      equals: category,
+      mode: "insensitive",
+    },
+  },
+  include: {
+    products: {
+      orderBy: {
+        price: 'asc',
+      },
+    },
+  },
+});
+
+    if (products.length === 0) {
+      res.status(404).json({ message: "No products found for this category" });
+      return;
+    }
+
+    res.json(products);
+  } catch (error) {
+    console.error("Error fetching products:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 app.use('/api/search', searchRoute);
 
 

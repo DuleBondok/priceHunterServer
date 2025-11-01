@@ -1,5 +1,3 @@
-
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -10,14 +8,14 @@ datasource db {
 }
 
 model Product {
-  id        Int      @id @default(autoincrement())
-  name      String
-  price     String
-  store     String
-  category  String
-  image     String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id                    Int                  @id @default(autoincrement())
+  name                  String
+  price                 String
+  store                 String
+  category              String
+  image                 String
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
   standardizedProductId Int?
   standardizedProduct   StandardizedProduct? @relation(fields: [standardizedProductId], references: [id])
 
@@ -25,17 +23,16 @@ model Product {
 }
 
 model StandardizedProduct {
-  id        Int       @id @default(autoincrement())
-  name      String    
-  image     String?
-  mainCategory  String?
-  midCategory String?
-  subCategory String?
-  brand     String?
-  volume    String?
-  attributes Json?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-
-  products  Product[]
+  id           Int       @id @default(autoincrement())
+  name         String
+  image        String?
+  mainCategory String?
+  midCategory  String?
+  subCategory  String?
+  brand        String?
+  volume       String?
+  attributes   Json?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  products     Product[]
 }
