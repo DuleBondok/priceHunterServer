@@ -130,23 +130,56 @@ app.get("/api/products/:category", async (req: Request, res: Response): Promise<
 
   try {
     const products = await prisma.standardizedProduct.findMany({
-  where: {
-    mainCategory: {
-      equals: category,
-      mode: "insensitive",
-    },
-  },
-  include: {
-    products: {
-      orderBy: {
-        price: 'asc',
+      where: {
+        mainCategory: {
+          equals: category,
+          mode: "insensitive",
+        },
       },
-    },
-  },
-});
+      include: {
+        products: {
+          orderBy: { price: "asc" },
+        },
+      },
+    });
 
     if (products.length === 0) {
       res.status(404).json({ message: "No products found for this category" });
+      return;
+    }
+
+    res.json(products);
+  } catch (error) {
+    console.error("Error fetching products:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// 2️⃣ Route for midCategory within main category
+app.get("/api/products/:category/:midCategory", async (req: Request, res: Response): Promise<void> => {
+  const { category, midCategory } = req.params;
+
+  try {
+    const products = await prisma.standardizedProduct.findMany({
+      where: {
+        mainCategory: {
+          equals: category,
+          mode: "insensitive",
+        },
+        midCategory: {
+          equals: midCategory,
+          mode: "insensitive",
+        },
+      },
+      include: {
+        products: {
+          orderBy: { price: "asc" },
+        },
+      },
+    });
+
+    if (products.length === 0) {
+      res.status(404).json({ message: "No products found for this subcategory" });
       return;
     }
 
