@@ -152,7 +152,43 @@ const brandMap: Record<string, string> = {
   Puddis: "Campina",
   Neoburger: "Neoburger",
   "Dr.Oetker": "Dr. Oetker",
-
+  "Aqua Viva": "Aqua Viva",
+  Rosa: "Rosa",
+  "Mivela": "Mg Mivela",
+  Prolom: "Prolom voda",
+  "Voda Voda": "Voda Voda",
+  Jana: "Jana",
+  Jazak: "Jazak Voda",
+  "Life Spring": "Nectar",
+  Donat: "Donat",
+  Fiji: "Fiji Water",
+  "Vrnjci": "Voda Vrnjci",
+  "Acqua Panna": "Acqua Panna",
+  "San Benedetto": "San Benedetto",
+  "Radenska": "Radenska Voda",
+  "Na Eks": "Na Eks",
+  Saguaro: "Saguaro",
+  Evian: "Evian",
+  Gala: "Aqua Gala",
+  Tronoša: "Tronoša Voda",
+  "Knjaz Miloš": "Knjaz Miloš",
+  Powerade: "Powerade",
+  Nutrend: "Nutrend",
+  "Moj Dan": "Moj Dan",
+  "San Pellegrino": "San Pellegrino",
+  Heba: "Heba",
+  Perrier: "Perrier",
+  Ivorell: "Ivorell",
+  Minaqua: "Minaqua",
+  Karađorđe: "Palanački Kiseljak",
+  "Vitamin Well": "Vitamin Well",
+  Dana: "Dana",
+  Fructal: "Fructal",
+  Oshee: "Oshee",
+  Reload: "Reload",
+  Romerquelle: "Romerquelle",
+  Rauch: "Rauch",
+  Cedevita: "Cedevita",
 };
 
 
@@ -207,9 +243,9 @@ async function scrapeCentotekaProducts(url: string): Promise<standardizedProduct
 
     return {
       name: name,
-      mainCategory: "Mlečni proizvodi i jaja",
-      midCategory: "Deserti",
-      subCategory: "Sutlijaš",
+      mainCategory: "Pića",
+      midCategory: "Voda",
+      subCategory: "Voda sa ukusom",
       brand,
       volume,
       image: p.image,
@@ -221,7 +257,7 @@ async function scrapeCentotekaProducts(url: string): Promise<standardizedProduct
 }
 
 // Example usage
-scrapeCentotekaProducts("https://cenoteka.rs/sutlijas/").then(async (products) => {
+scrapeCentotekaProducts("https://cenoteka.rs/vode-sa-ukusom/p/4/").then(async (products) => {
   console.log(products);
   await saveProducts(products);
   console.log("Products saved to DB");

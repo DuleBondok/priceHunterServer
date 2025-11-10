@@ -10,6 +10,7 @@ datasource db {
 model Product {
   id                    Int                  @id @default(autoincrement())
   name                  String
+  normalizedName        String?
   price                 String
   store                 String
   category              String
@@ -19,7 +20,7 @@ model Product {
   standardizedProductId Int?
   standardizedProduct   StandardizedProduct? @relation(fields: [standardizedProductId], references: [id])
 
-  @@unique([name, store], name: "name_store")
+  @@unique([normalizedName, store], name: "normalizedName_store")
 }
 
 model StandardizedProduct {

@@ -1,106 +1,78 @@
 import prisma from './prismaClient';
 
-type ProductData = {
-    name: string;
-    price: string;
-    image: string;
-    store: string;
-    category: string;
-  };
+export type ProductData = {
+  name: string;
+  price: string;
+  image: string;
+  store: string;
+  category: string;
+};
 
-
-
-async function createProduct(productData: ProductData) {
-    try {
-        await prisma.product.upsert({
-            where: {
-                name_store: {
-                    name: productData.name,
-                    store: productData.store,
-                }
-            },
-            update: {
-                price: productData.price,
-                image: productData.image,
-                category: productData.category,
-            },
-            create: {
-                name: productData.name,
-                price: productData.price,
-                image: productData.image,
-                store: productData.store,
-                category: productData.category,
-            }
-        });
-        console.log(`Product processed successfully: ${productData.name}`);
-    } catch (error: unknown) {
-        if (error instanceof Error) {
-          console.error(`❌ Error processing product: ${error.message}`);
-        } else {
-          console.error('❌ Unknown error processing product:', error);
-        }
-      }
+// 🧼 Normalize name (remove accents, special characters, normalize spaces)
+function normalizeName(name: string): string {
+  return name
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // remove accent marks
+    .replace(/[’'`"´¿]/g, '') // remove quote-like chars
+    .replace(/[^a-zA-Z0-9\s]/g, '') // remove non-alphanumeric except spaces
+    .toLowerCase()
+    .replace(/\s+/g, ' ') // collapse multiple spaces
+    .trim();
 }
 
-async function saveProducts(products:ProductData[]) {
+export async function saveProducts(products: ProductData[]) {
+  if (products.length === 0) {
+    console.log('⚠️ No products to save.');
+    return { created: 0, updated: 0, totalInDb: await prisma.product.count() };
+  }
+
+  console.log(`🛠️ Processing ${products.length} products...`);
+
+  const upserts = products.map((p) => {
+    const normalizedName = normalizeName(p.name);
+
+    return prisma.product.upsert({
+      where: {
+        normalizedName_store: { normalizedName, store: p.store },
+      },
+      update: {
+        // ✅ Only update price if product exists
+        price: p.price,
+        updatedAt: new Date(),
+      },
+      create: {
+        // 🆕 Create a new product if not found
+        name: p.name,
+        normalizedName,
+        price: p.price,
+        image: p.image,
+        store: p.store,
+        category: p.category,
+      },
+    });
+  });
+
+  try {
+    const results = await prisma.$transaction(upserts);
+
+    // Count updates vs creations
     let createdCount = 0;
     let updatedCount = 0;
 
-    for (const product of products) {
-        try {
-            const existingProduct = await prisma.product.findUnique({
-                where: {
-                    name_store: {
-                        name: product.name,
-                        store: product.store
-                    }
-                }
-            });
-
-            if (existingProduct) {
-                await prisma.product.update({
-                    where: {
-                        name_store: {
-                            name: product.name,
-                            store: product.store
-                        }
-                    },
-                    data: {
-                        price: product.price,
-                        image: product.image,
-                        category: product.category,
-                    }
-                });
-                updatedCount++;
-            } else {
-                await prisma.product.create({
-                    data: {
-                        name: product.name,
-                        price: product.price,
-                        image: product.image,
-                        store: product.store,
-                        category: product.category,
-                    }
-                });
-                createdCount++;
-            }
-        } catch (err: unknown) {
-            if (err instanceof Error) {
-              console.error(`❌ Error saving product ${product.name}:`, err.message);
-            } else {
-              console.error(`❌ Unknown error saving product ${product.name}:`, err);
-            }
-          }
+    for (const r of results) {
+      // Prisma doesn't return if it was created or updated,
+      // so we infer based on timestamps (works since updatedAt auto-changes)
+      if (r.createdAt.getTime() === r.updatedAt.getTime()) createdCount++;
+      else updatedCount++;
     }
 
     const totalInDb = await prisma.product.count();
 
-    return {
-        created: createdCount,
-        updated: updatedCount,
-        totalInDb,
-    };
-}
+    console.log(`✅ Created: ${createdCount}, Updated: ${updatedCount}, Total in DB: ${totalInDb}`);
 
-export default saveProducts;
-export { createProduct, type ProductData };
+    return { created: createdCount, updated: updatedCount, totalInDb };
+  } catch (error: any) {
+    console.error('❌ Transaction failed:', error.message);
+    throw error;
+  }
+}

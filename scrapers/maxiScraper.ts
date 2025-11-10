@@ -1,5 +1,5 @@
 import puppeteer from "puppeteer";
-import { createProduct, ProductData } from '../productService';
+import { saveProducts, ProductData } from '../productService';
 
 async function scrapeMaxi(): Promise<ProductData[]> {
   try {
@@ -80,9 +80,7 @@ async function scrapeMaxi(): Promise<ProductData[]> {
     console.log(`Total unique products: ${allItems.length}`);
 
     // Use your existing service function
-    for (const product of allItems) {
-      await createProduct(product);
-    }
+    await saveProducts(allItems);
 
     await browser.close();
     return allItems;

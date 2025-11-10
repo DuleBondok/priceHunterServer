@@ -1,5 +1,5 @@
 import puppeteer, { Browser, Page } from "puppeteer";
-import saveProducts, { createProduct } from '../productService';
+import { saveProducts } from "../productService";
 
 interface Product {
   name: string;

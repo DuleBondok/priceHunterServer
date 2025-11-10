@@ -6,7 +6,7 @@ import cors from "cors";
 import puppeteer from "puppeteer";
 import { scrapeMultipleCategories } from "./scrapers/ideaScraper";
 import scrapeMaxi from './scrapers/maxiScraper';
-import saveProducts from './productService';
+import { saveProducts } from './productService';
 import scrapeDisProducts from "./scrapers/disScraper";
 import { clearDatabase } from './clearDb';
 import searchRoute from './searchLogic';
