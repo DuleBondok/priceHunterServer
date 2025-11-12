@@ -81,6 +81,7 @@ export async function scrapeIdeaProducts(url: string): Promise<Product[]> {
 
 export async function scrapeMultipleCategories(): Promise<Product[]> {
     const urls: string[] = [
+        /*
         'https://online.idea.rs/#!/categories/60016184/cokoladno-mleko/products',
         'https://online.idea.rs/#!/categories/60016182/sveze-mleko/products',
         'https://online.idea.rs/#!/categories/60016183/dugotrajno-mleko/products',
@@ -111,6 +112,12 @@ export async function scrapeMultipleCategories(): Promise<Product[]> {
         'https://online.idea.rs/#!/categories/60007830/margarin-i-maslac/products',
         'https://online.idea.rs/#!/categories/60007829/majonez-i-prelivi/products',
         'https://online.idea.rs/#!/categories/60007831/mlecni-dezerti/products',
+        */
+       'https://online.idea.rs/#!/categories/60013823/negazirana-voda/products',
+       'https://online.idea.rs/#!/categories/60013822/gazirana-voda/products',
+       'https://online.idea.rs/#!/categories/60013824/voda-sa-ukusom/products',
+
+
     ];
 
     const allProducts: Product[] = [];

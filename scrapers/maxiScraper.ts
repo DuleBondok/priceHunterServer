@@ -10,7 +10,8 @@ async function scrapeMaxi(): Promise<ProductData[]> {
     const uniqueItemsMap = new Map<string, ProductData>();
 
     while (true) {
-      const url = `https://www.maxi.rs/Mlechni-proizvodi-i-jaja/c/02?q=%3Arelevance&sort=relevance&pageNumber=${currentPage}`;
+      //const url = `https://www.maxi.rs/Mlechni-proizvodi-i-jaja/c/02?q=%3Arelevance&sort=relevance&pageNumber=${currentPage}`;
+      const url = `https://www.maxi.rs/Picje-kafa-i-chaj/Mineralna-voda/c/0101?q=%3Arelevance&sort=relevance&pageNumber=${currentPage}`;
       console.log(`Scraping page ${currentPage}: ${url}`);
       await page.goto(url, { waitUntil: 'domcontentloaded' });
 
