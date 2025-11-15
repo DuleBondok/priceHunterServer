@@ -29,7 +29,7 @@ async function scrapeDisProducts(
       }
     });
     
-    await page.select('select', 'C1');
+    await page.select('select', 'O1');
     
     console.log("Waiting for category filter to apply...");
     await Promise.all([
