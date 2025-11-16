@@ -116,7 +116,15 @@ export async function scrapeMultipleCategories(): Promise<Product[]> {
        'https://online.idea.rs/#!/categories/60013823/negazirana-voda/products',
        'https://online.idea.rs/#!/categories/60013822/gazirana-voda/products',
        'https://online.idea.rs/#!/categories/60013824/voda-sa-ukusom/products', */
-       'https://online.idea.rs/#!/categories/60013821/energetski-i-izotonicni-napici/products'
+       'https://online.idea.rs/#!/categories/60013846/tradicionalna-kafa/products',
+       'https://online.idea.rs/#!/categories/60013847/kapsule-i-espresso/products',
+       'https://online.idea.rs/#!/categories/60013848/instant-kafa/products',
+       'https://online.idea.rs/#!/categories/60013849/filter-kafa-i-dodaci-za-kafu/products',
+       'https://online.idea.rs/#!/categories/60022082/gotove-kafe/products?'
+
+
+
+
     ];
 
     const allProducts: Product[] = [];

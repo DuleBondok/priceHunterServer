@@ -232,7 +232,23 @@ const brandMap: Record<string, string> = {
   Hochwald: "Hochwald",
   Parmalat: "Parmalat",
   Landessa: "Landessa",
-  Cafemio: "Cafemio"
+  Cafemio: "Cafemio",
+  "Lavazza": "Lavazza",
+  Segafredo: "Segafredo",
+  Hausbrandt: "Hausbrandt",
+  Amigos: "Amigos",
+  "Barcaffe": "Barcaffe",
+  Rivolta: "Rivolta",
+  Kilo: "Kilo",
+  Carraro: "Carraro",
+  Pera: "Pera",
+  Dimello: "Dimello",
+  Gimoka: "Gimoka",
+  Covim: "Covim",
+  
+
+
+
 
 
 
@@ -295,7 +311,7 @@ async function scrapeCentotekaProducts(url: string): Promise<standardizedProduct
       name: name,
       mainCategory: "Pica",
       midCategory: "Kafa",
-      subCategory: "Dodaci za kafu",
+      subCategory: "Espresso kafa",
       brand,
       volume,
       image: p.image,
@@ -307,7 +323,7 @@ async function scrapeCentotekaProducts(url: string): Promise<standardizedProduct
 }
 
 // Example usage
-scrapeCentotekaProducts("https://cenoteka.rs/dodatak-za-kafu/").then(async (products) => {
+scrapeCentotekaProducts("https://cenoteka.rs/espresso-kafa/p/9/").then(async (products) => {
   console.log(products);
   await saveProducts(products);
   console.log("Products saved to DB");
