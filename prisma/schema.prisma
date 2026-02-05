@@ -11,6 +11,7 @@ model Product {
   id                    Int                  @id @default(autoincrement())
   name                  String
   normalizedName        String?
+  priceBeforeDiscount   Decimal? 
   price                 String
   store                 String
   category              String

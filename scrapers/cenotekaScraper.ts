@@ -245,16 +245,54 @@ const brandMap: Record<string, string> = {
   Dimello: "Dimello",
   Gimoka: "Gimoka",
   Covim: "Covim",
-  
-
-
-
-
-
-
-
-
-
+  Fructus: "Fructus",
+  Milford: "Milford",
+  Schargo: "Schargo",
+  Welton: "Welton",
+  Teekanne: "Teekanne",
+  Althaus: "Althaus",
+  Plantago: "Plantago",
+  Macval: "Macval",
+  "Josfic Pancic": "Josif Pancic",
+  "Tea Time": "Tea Time",
+  "Herba Nobilis": "Herba Nobilis",
+  "Moc Bilja": "Moc Bilja",
+  "Vitamin": "Vitamin",
+  "Ahmad Tea": "Ahmad Tea",
+  Kirkolina: "Kirkolina",
+  "Lord Nelson": "Lord Nelson",
+  Becutan: "Becutan",
+  Podravka: "Podravka",
+  Yumis: "Yumis",
+  "Sir Winston": "Sir Winston",
+  Stassen: "Stassen",
+  Kruger: "Kruger",
+  Mirinda: "Mirinda",
+  "Coca Cola": "Coca Cola",
+  Schweppes: "Schweppes",
+  Cockta: "Cockta",
+  Fanta: "Fanta",
+  Pepsi: "Pepsi",
+  "7 UP": "7 UP",
+  "Lemon Soda": "Lemon Soda",
+  XIXO: "XIXO",
+  Orangina: "Orangina",
+  Soofty: "Soofty",
+  Nectar: "Nectar",
+  Robby: "Robby",
+  Evervess: "Evervess",
+  Sprite: "Sprite",
+  Yippy: "Yippy",
+  "Orange Soda": "Orange Soda",
+  Fentimans: "Fentimans",
+  Vitapress: "Vitapress",
+  "Dr. Pepper": "Dr. Pepper",
+  Freeway: "Freeway",
+  Golf: "Golf",
+  Spezi: "Spezi",
+  Takovo: "Takovo",
+  Alpina: "Alpina",
+  Limona: "Limona",
 };
 
 
@@ -310,8 +348,8 @@ async function scrapeCentotekaProducts(url: string): Promise<standardizedProduct
     return {
       name: name,
       mainCategory: "Pica",
-      midCategory: "Kafa",
-      subCategory: "Espresso kafa",
+      midCategory: "Sokovi",
+      subCategory: "Gazirani sokovi",
       brand,
       volume,
       image: p.image,
@@ -323,7 +361,7 @@ async function scrapeCentotekaProducts(url: string): Promise<standardizedProduct
 }
 
 // Example usage
-scrapeCentotekaProducts("https://cenoteka.rs/espresso-kafa/p/9/").then(async (products) => {
+scrapeCentotekaProducts("https://cenoteka.rs/gazirani-sokovi-preko-15l/p/2/").then(async (products) => {
   console.log(products);
   await saveProducts(products);
   console.log("Products saved to DB");

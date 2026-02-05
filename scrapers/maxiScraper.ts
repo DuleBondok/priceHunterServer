@@ -10,10 +10,12 @@ async function scrapeMaxi(): Promise<ProductData[]> {
     const uniqueItemsMap = new Map<string, ProductData>();
 
     while (true) {
-      //const url = `https://www.maxi.rs/Mlechni-proizvodi-i-jaja/c/02?q=%3Arelevance&sort=relevance&pageNumber=${currentPage}`;
-      //const url = `https://www.maxi.rs/Picje-kafa-i-chaj/Mineralna-voda/c/0101?q=%3Arelevance&sort=relevance&pageNumber=${currentPage}`;
-      //const url = `https://www.maxi.rs/Picje-kafa-i-chaj/Energetski-napici/c/0103?q=%3Arelevance&sort=relevance&pageNumber=${currentPage}`;
-      const url = `https://www.maxi.rs/Picje-kafa-i-chaj/Kafa/c/0110?q=%3Arelevance&sort=relevance&pageNumber=${currentPage}`;
+       //const url = `https://www.maxi.rs/Mlechni-proizvodi-i-jaja/c/02?q=%3Arelevance&sort=relevance&pageNumber=${currentPage}`;
+       // const url = `https://www.maxi.rs/Picje-kafa-i-chaj/Mineralna-voda/c/0101?q=%3Arelevance&sort=relevance&pageNumber=${currentPage}`;
+      // const url = `https://www.maxi.rs/Picje-kafa-i-chaj/Energetski-napici/c/0103?q=%3Arelevance&sort=relevance&pageNumber=${currentPage}`;
+      // const url = `https://www.maxi.rs/Picje-kafa-i-chaj/Kafa/c/0110?q=%3Arelevance&sort=relevance&pageNumber=${currentPage}`;
+      // const url = `https://www.maxi.rs/Picje-kafa-i-chaj/Chaj/c/0111?q=%3Arelevance&sort=relevance&pageNumber=${currentPage}`;
+      const url = `https://www.maxi.rs/Picje-kafa-i-chaj/Sokovi-i-osvezhavajucja-bezalkoholna-picja/Gazirani-napici/c/010202?q=%3Arelevance&sort=relevance&pageNumber=${currentPage}`;
 
       console.log(`Scraping page ${currentPage}: ${url}`);
       await page.goto(url, { waitUntil: "domcontentloaded" });
@@ -27,10 +29,10 @@ async function scrapeMaxi(): Promise<ProductData[]> {
           .querySelectorAll('[data-testid="product-tile-footer"]')
           .forEach((footer) => {
             const tile = footer.closest(
-              '[data-testid="product-block"]'
+              '[data-testid="product-block"]',
             )?.parentElement;
             const nameLink = tile?.querySelector(
-              '[data-testid="product-block-name-link"]'
+              '[data-testid="product-block-name-link"]',
             );
             const brand =
               nameLink
@@ -43,7 +45,7 @@ async function scrapeMaxi(): Promise<ProductData[]> {
             const fullName = `${brand} ${name}`.trim();
 
             const priceContainer = tile?.querySelector(
-              '[data-testid="product-block-price"]'
+              '[data-testid="product-block-price"]',
             );
 
             let whole =
@@ -68,8 +70,27 @@ async function scrapeMaxi(): Promise<ProductData[]> {
               price = `${numericPrice.toFixed(2)} ${currency}`;
             }
 
+            const oldPriceContainer = tile?.querySelector(
+              '[data-testid="product-block-old-price"]',
+            );
+
+            let numericOldPrice: number | null = null;
+
+            const oldText =
+              oldPriceContainer?.querySelector("span")?.textContent?.trim() ||
+              "";
+
+            if (oldText) {
+              const cleaned = oldText
+                .replace("RSD", "")
+                .replace(/\s+/g, "")
+                .replace(",", ".");
+              const match = cleaned.match(/(\d+(\.\d+)?)/);
+              numericOldPrice = match ? Number(match[1]) : null;
+            }
+
             const imageEl = tile?.querySelector(
-              'img[data-testid="product-block-image"]'
+              'img[data-testid="product-block-image"]',
             );
 
             let imageUrl = "";
@@ -88,6 +109,7 @@ async function scrapeMaxi(): Promise<ProductData[]> {
               products.push({
                 name: fullName,
                 price,
+                priceBeforeDiscount: numericOldPrice,
                 store: "Maxi",
                 category: "Drinks",
                 image: imageUrl,

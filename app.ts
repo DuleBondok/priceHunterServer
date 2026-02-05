@@ -11,6 +11,7 @@ import scrapeDisProducts from "./scrapers/disScraper";
 import { clearDatabase } from './clearDb';
 import searchRoute from './searchLogic';
 import { getProductMatches } from "./testMatching";
+import { addDiscountFields } from "./utils/addDiscountFields";
 
 
 
@@ -148,7 +149,15 @@ app.get("/api/products/:category", async (req: Request, res: Response): Promise<
       return;
     }
 
-    res.json(products);
+    const result = addDiscountFields(products);
+
+    // ✅ DEBUG LOG
+    console.log(
+      "DEBUG PRODUCT:",
+      result?.[0]?.products?.[0]
+    );
+
+    res.json(result);
   } catch (error) {
     console.error("Error fetching products:", error);
     res.status(500).json({ error: "Internal server error" });
@@ -183,7 +192,7 @@ app.get("/api/products/:category/:midCategory", async (req: Request, res: Respon
       return;
     }
 
-    res.json(products);
+    res.json(addDiscountFields(products));
   } catch (error) {
     console.error("Error fetching products:", error);
     res.status(500).json({ error: "Internal server error" });
@@ -225,7 +234,7 @@ app.get(
         return;
       }
 
-      res.json(products);
+      res.json(addDiscountFields(products));
     } catch (error) {
       console.error("Error fetching products:", error);
       res.status(500).json({ error: "Internal server error" });

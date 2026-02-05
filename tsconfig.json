@@ -20,8 +20,8 @@
     "jsx": "preserve"
   },
   "include": [
-    "src/**/*", // Adjust this if your files are elsewhere
-    "prismaClient.ts" // Explicitly include prismaClient.ts
+    "src/**/*",
+    "prismaClient.ts"
   ],
   "exclude": [
     "node_modules"
