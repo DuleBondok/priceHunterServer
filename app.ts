@@ -179,7 +179,7 @@ app.get("/api/products/:category/:midCategory", async (req: Request, res: Respon
           equals: midCategory,
           mode: "insensitive",
         },
-      },
+      }, 
       include: {
         products: {
           orderBy: { price: "asc" },

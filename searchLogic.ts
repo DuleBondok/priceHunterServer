@@ -19,7 +19,7 @@ function expandSerbianVariants(query: string): string[] {
 
   for (const char of chars) {
     const variants = replacements[char] || [char];
-    const newCombinations: string[] = [];
+    const newCombinations: string[] = []; 
 
     for (const prefix of combinations) {
       for (const variant of variants) {
@@ -48,7 +48,7 @@ router.get("/", async (req: Request, res: Response): Promise<void> => {
     for (const term of terms) {
       const expanded = expandSerbianVariants(term);
 
-      const orSubConditions: Prisma.StandardizedProductWhereInput[] =
+      const orSubConditions: Prisma.StandardizedProductWhereInput[] = 
         expanded.flatMap((variant) => [
           {
             name: {
