@@ -154,8 +154,9 @@ export async function scrapeMultipleCategories(): Promise<Product[]> {
     "https://online.idea.rs/#!/categories/60013860/biljni-caj/products",
     "https://online.idea.rs/#!/categories/60013861/vocni-caj/products",
     "https://online.idea.rs/#!/categories/60025734/mesavine/products",
-    "https://online.idea.rs/#!/categories/60025735/ostalo/products",*/
-    "https://online.idea.rs/#!/categories/60013825/gazirani-sokovi/products",
+    "https://online.idea.rs/#!/categories/60025735/ostalo/products",
+    "https://online.idea.rs/#!/categories/60013825/gazirani-sokovi/products",*/
+    "https://online.idea.rs/#!/categories/60013821/energetski-i-izotonicni-napici/products"
   ];
 
   const allProducts: Product[] = [];

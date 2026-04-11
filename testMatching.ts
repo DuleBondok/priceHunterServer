@@ -3,6 +3,9 @@ import stringSimilarity from 'string-similarity';
 
 const prisma = new PrismaClient();
 
+/**
+ * Normalize Balkan text (čćšžđ → ascii)
+ */
 function normalizeText(text: string): string {
   return text
     .toLowerCase()
@@ -15,48 +18,64 @@ function normalizeText(text: string): string {
     .trim();
 }
 
-function extractVolumeFromName(name: string): string | null {
-  const regex = /(\d+[.,]?\d*)(\s)?(l|litara|litar|ml|mililitar|mililitara|g|grama|kg|kilograma|kom|komada)/i;
-  const match = name.match(regex);
-  if (!match) return null;
+/**
+ * Extract ALL volumes and normalize to liters (number)
+ * Handles messy strings like: 0.335KG0,355ml
+ */
+function extractVolumesNormalized(text: string): number[] {
+  const regex = /(\d+[.,]?\d*)(\s)?(l|ml|kg|g)/gi;
+  const matches = [...text.matchAll(regex)];
 
-  let amount = parseFloat(match[1].replace(',', '.'));
-  let unit = match[3].toLowerCase();
+  const results: number[] = [];
 
-  if (unit === 'ml' || unit.includes('milil')) {
-    amount /= 1000;
-    unit = 'L';
-  } else if (unit === 'g' || unit.includes('grama')) {
-    amount /= 1000;
-    unit = 'kg';
-  } else if (unit.startsWith('kom')) {
-    unit = 'kom';
+  for (const m of matches) {
+    let amount = parseFloat(m[1].replace(',', '.'));
+    let unit = m[3].toLowerCase();
+
+    if (unit === 'ml') {
+      results.push(amount / 1000);
+    } else if (unit === 'l') {
+      results.push(amount);
+    } else if (unit === 'g') {
+      // assume liquid-like products
+      results.push(amount / 1000);
+    } else if (unit === 'kg') {
+      results.push(amount);
+    }
   }
 
-  return `${amount}${unit}`;
+  return results;
 }
 
-function extractEggCount(name: string): string | null {
-  // Match a number followed by / and a number (e.g. 10/1, 30/1)
-  // We extract the first number as the count
-  const regex = /(\d+)\/\d+/;
-  const match = name.match(regex);
-  if (!match) return null;
+/**
+ * Find best volume match between two arrays
+ */
+function getBestVolumeScore(a: number[], b: number[]): number {
+  if (!a.length || !b.length) return 0;
 
-  const count = parseInt(match[1], 10);
-  return `${count}kom`;
+  let bestDiff = Infinity;
+
+  for (const v1 of a) {
+    for (const v2 of b) {
+      const diff = Math.abs(v1 - v2);
+      if (diff < bestDiff) bestDiff = diff;
+    }
+  }
+
+  // Convert difference to score (0–1)
+  return Math.max(0, 1 - bestDiff); // tolerance built-in
 }
 
 export async function getProductMatches() {
   const allStandards = await prisma.standardizedProduct.findMany({
-  include: {
-    products: true, // Load all linked products
-  },
-});
+    include: {
+      products: true,
+    },
+  });
 
-const standards = allStandards.filter(
-  (sp) => sp.products.length <= 2 // Keep only those with 0-2 products
-);
+  const standards = allStandards.filter(
+    (sp) => sp.products.length <= 2
+  );
 
   const unmatchedProducts = await prisma.product.findMany({
     where: {
@@ -68,31 +87,45 @@ const standards = allStandards.filter(
 
   for (const scraped of unmatchedProducts) {
     const normalizedScraped = normalizeText(scraped.name);
-    const extractedVolume = extractVolumeFromName(scraped.name);
-    if (!extractedVolume) continue;
+    const scrapedVolumes = extractVolumesNormalized(scraped.name);
 
-    const normalizedVolume = normalizeText(extractedVolume);
+    let bestMatch: any = null;
 
-    const candidates = standards.filter(sp => {
-      if (!sp.volume) return false;
-      return normalizeText(sp.volume) === normalizedVolume;
-    });
+    for (const sp of standards) {
+      const combined = `${sp.brand ?? ''} ${sp.name}`;
+      const normalizedCombined = normalizeText(combined);
 
-    const scored = candidates
-      .map(sp => {
-        const combined = `${sp.brand ?? ''} ${sp.name}`;
-        const normalizedCombined = normalizeText(combined);
-        const similarity = stringSimilarity.compareTwoStrings(normalizedScraped, normalizedCombined);
-        return { product: scraped, standardizedProduct: sp, similarity };
-      })
-      .sort((a, b) => b.similarity - a.similarity);
+      const similarity = stringSimilarity.compareTwoStrings(
+        normalizedScraped,
+        normalizedCombined
+      );
 
-    const best = scored[0];
+      const spVolumes = extractVolumesNormalized(sp.volume ?? '');
 
-    if (best && best.similarity > 0.5) {
-      matches.push(best);
+      const volumeScore = getBestVolumeScore(
+        scrapedVolumes,
+        spVolumes
+      );
+
+      // 🔥 FINAL SCORE (tweak weights if needed)
+      const finalScore = similarity * 0.8 + volumeScore * 0.2;
+
+      if (!bestMatch || finalScore > bestMatch.finalScore) {
+        bestMatch = {
+          product: scraped,
+          standardizedProduct: sp,
+          similarity,
+          volumeScore,
+          finalScore,
+        };
+      }
+    }
+
+    // threshold
+    if (bestMatch && bestMatch.finalScore > 0.45) {
+      matches.push(bestMatch);
     }
   }
 
-  return matches;
+  return matches.sort((a, b) => b.finalScore - a.finalScore);
 }
