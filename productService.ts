@@ -2,7 +2,7 @@
 
   export type ProductData = {
     name: string;
-    price: string;
+    price: string | null;
     priceBeforeDiscount?: number | null;
     image: string;
     store: string;
@@ -21,63 +21,94 @@
       .trim();
   }
 
-  export async function saveProducts(products: ProductData[]) {
-    if (products.length === 0) {
-      console.log("⚠️ No products to save.");
-      return { created: 0, updated: 0, totalInDb: await prisma.product.count() };
-    }
+export async function saveProducts(products: ProductData[]) {
+  if (products.length === 0) {
+    console.log("⚠️ No products to save.");
+    return {
+      created: 0,
+      updated: 0,
+      totalInDb: await prisma.product.count(),
+    };
+  }
 
-    console.log(`🛠️ Processing ${products.length} products...`);
+  console.log(`🛠️ Processing ${products.length} products...`);
 
-    const upserts = products.map((p) => {
-      const normalizedName = normalizeName(p.name);
+  // 1. LOAD ALL EXISTING PRODUCTS ONCE
+  const existingProducts = await prisma.product.findMany({
+    select: {
+      id: true,
+      normalizedName: true,
+      store: true,
+    },
+  });
 
-      return prisma.product.upsert({
-        where: {
-          normalizedName_store: { normalizedName, store: p.store },
-        },
-        update: {
-          price: p.price,
-          priceBeforeDiscount: p.priceBeforeDiscount ?? null,
-          image: p.image,
-          updatedAt: new Date(),
-        },
-        create: {
-          // 🆕 Create a new product if not found
-          name: p.name,
-          normalizedName,
-          price: p.price,
-          priceBeforeDiscount: p.priceBeforeDiscount ?? null,
-          image: p.image,
-          store: p.store,
-          category: p.category,
-        },
-      });
-    });
+  // 2. CREATE FAST LOOKUP MAP
+  const productMap = new Map(
+    existingProducts.map((p) => [
+      `${p.normalizedName}-${p.store}`,
+      p.id,
+    ]),
+  );
 
-    try {
-      const results = await prisma.$transaction(upserts);
+  let createdCount = 0;
+  let updatedCount = 0;
 
-      // Count updates vs creations
-      let createdCount = 0;
-      let updatedCount = 0;
+  // 3. PROCESS SCRAPED DATA
+  const createOps: any[] = [];
+  const updateOps: any[] = [];
 
-      for (const r of results) {
-        // Prisma doesn't return if it was created or updated,
-        // so we infer based on timestamps (works since updatedAt auto-changes)
-        if (r.createdAt.getTime() === r.updatedAt.getTime()) createdCount++;
-        else updatedCount++;
-      }
+  for (const p of products) {
+    const normalizedName = normalizeName(p.name);
+    const key = `${normalizedName}-${p.store}`;
 
-      const totalInDb = await prisma.product.count();
+    const existingId = productMap.get(key);
 
-      console.log(
-        `✅ Created: ${createdCount}, Updated: ${updatedCount}, Total in DB: ${totalInDb}`,
+    // EXISTING PRODUCT → UPDATE
+    if (existingId) {
+      updateOps.push(
+        prisma.product.update({
+          where: { id: existingId },
+          data: {
+            price: p.price,
+            priceBeforeDiscount: p.priceBeforeDiscount ?? null,
+            image: p.image,
+            updatedAt: new Date(),
+          },
+        }),
       );
 
-      return { created: createdCount, updated: updatedCount, totalInDb };
-    } catch (error: any) {
-      console.error("❌ Transaction failed:", error.message);
-      throw error;
+      updatedCount++;
+      continue;
+    }
+
+    // NEW PRODUCT → ONLY IF HAS PRICE
+    if (p.price !== null) {
+      createOps.push(
+        prisma.product.create({
+          data: {
+            name: p.name,
+            normalizedName,
+            price: p.price,
+            priceBeforeDiscount: p.priceBeforeDiscount ?? null,
+            image: p.image,
+            store: p.store,
+            category: p.category,
+          },
+        }),
+      );
+
+      createdCount++;
     }
   }
+
+  // 4. EXECUTE IN PARALLEL (FAST)
+  await Promise.all([...updateOps, ...createOps]);
+
+  const totalInDb = await prisma.product.count();
+
+  console.log(
+    `⚡ Created: ${createdCount}, Updated: ${updatedCount}, Total: ${totalInDb}`,
+  );
+
+  return { created: createdCount, updated: updatedCount, totalInDb };
+}

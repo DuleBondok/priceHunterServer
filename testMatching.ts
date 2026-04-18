@@ -63,11 +63,14 @@ function getBestVolumeScore(a: number[], b: number[]): number {
   }
 
   // Convert difference to score (0–1)
-  return Math.max(0, 1 - bestDiff); // tolerance built-in
+  return Math.max(0, 1 - bestDiff);
 }
 
 export async function getProductMatches() {
   const allStandards = await prisma.standardizedProduct.findMany({
+    where: {
+      mainCategory: "Alkoholna Pica",
+    },
     include: {
       products: true,
     },
@@ -80,6 +83,7 @@ export async function getProductMatches() {
   const unmatchedProducts = await prisma.product.findMany({
     where: {
       standardizedProductId: null,
+      category: "Alcohol",
     },
   });
 
@@ -107,7 +111,6 @@ export async function getProductMatches() {
         spVolumes
       );
 
-      // 🔥 FINAL SCORE (tweak weights if needed)
       const finalScore = similarity * 0.8 + volumeScore * 0.2;
 
       if (!bestMatch || finalScore > bestMatch.finalScore) {
@@ -122,7 +125,7 @@ export async function getProductMatches() {
     }
 
     // threshold
-    if (bestMatch && bestMatch.finalScore > 0.45) {
+    if (bestMatch && bestMatch.finalScore > 0.55) {
       matches.push(bestMatch);
     }
   }

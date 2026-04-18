@@ -10,12 +10,32 @@ async function scrapeMaxi(): Promise<ProductData[]> {
     const uniqueItemsMap = new Map<string, ProductData>();
 
     while (true) {
-       //const url = `https://www.maxi.rs/Mlechni-proizvodi-i-jaja/c/02?q=%3Arelevance&sort=relevance&pageNumber=${currentPage}`;
-       // const url = `https://www.maxi.rs/Picje-kafa-i-chaj/Mineralna-voda/c/0101?q=%3Arelevance&sort=relevance&pageNumber=${currentPage}`;
+      //const url = `https://www.maxi.rs/Mlechni-proizvodi-i-jaja/c/02?q=%3Arelevance&sort=relevance&pageNumber=${currentPage}`;
+      // const url = `https://www.maxi.rs/Picje-kafa-i-chaj/Mineralna-voda/c/0101?q=%3Arelevance&sort=relevance&pageNumber=${currentPage}`;
       // const url = `https://www.maxi.rs/Picje-kafa-i-chaj/Energetski-napici/c/0103?q=%3Arelevance&sort=relevance&pageNumber=${currentPage}`;
       // const url = `https://www.maxi.rs/Picje-kafa-i-chaj/Kafa/c/0110?q=%3Arelevance&sort=relevance&pageNumber=${currentPage}`;
       // const url = `https://www.maxi.rs/Picje-kafa-i-chaj/Chaj/c/0111?q=%3Arelevance&sort=relevance&pageNumber=${currentPage}`;
-      const url = `https://www.maxi.rs/Picje-kafa-i-chaj/Sokovi-i-osvezhavajucja-bezalkoholna-picja/Gazirani-napici/c/010202?q=%3Arelevance&sort=relevance&pageNumber=${currentPage}`;
+      // const url = `https://www.maxi.rs/Picje-kafa-i-chaj/Sokovi-i-osvezhavajucja-bezalkoholna-picja/Gazirani-napici/c/010202?q=%3Arelevance&sort=relevance&pageNumber=${currentPage}`;
+      // const url = `https://www.maxi.rs/Picje-kafa-i-chaj/Sokovi-i-osvezhavajucja-bezalkoholna-picja/Vocjni-sokovi-nektari-i-negazirana-picja/Vocjni-sokovi/c/01020301?q=%3Arelevance&sort=relevance&pageNumber=${currentPage}`;
+      // const url = `https://www.maxi.rs/Picje-kafa-i-chaj/Sokovi-i-osvezhavajucja-bezalkoholna-picja/Vocjni-sokovi-nektari-i-negazirana-picja/Nektari/c/01020302?q=%3Arelevance&sort=relevance&pageNumber=${currentPage}`;
+      // const url = `https://www.maxi.rs/Picje-kafa-i-chaj/Sokovi-i-osvezhavajucja-bezalkoholna-picja/Vocjni-sokovi-nektari-i-negazirana-picja/Osvezhavajucja-bezalkoholna-picja/c/01020303?q=%3Arelevance&sort=relevance&pageNumber=${currentPage}`;
+      // const url = `https://www.maxi.rs/Picje-kafa-i-chaj/Sokovi-i-osvezhavajucja-bezalkoholna-picja/Vocjni-sokovi-nektari-i-negazirana-picja/Ledeni-chaj/c/010201?q=%3Arelevance&sort=relevance&pageNumber=${currentPage}`;
+      // const url = `https://www.maxi.rs/Picje-kafa-i-chaj/Sokovi-i-osvezhavajucja-bezalkoholna-picja/Instant-napici/c/0104?q=%3Arelevance&sort=relevance`;
+      //const url = `https://www.maxi.rs/Picje-kafa-i-chaj/Kvas/c/0105?q=%3Arelevance&sort=relevance`;
+      // const url = `https://www.maxi.rs/Picje-kafa-i-chaj/Pivo/c/0106?q=%3Arelevance&sort=relevance&pageNumber=${currentPage}`;
+      // const url = `https://www.maxi.rs/Picje-kafa-i-chaj/Zhestoka-picja/Viski/c/010907?q=%3Arelevance&sort=relevance&pageNumber=${currentPage}`;
+      // const url = `https://www.maxi.rs/Picje-kafa-i-chaj/Zhestoka-picja/Dzhin/c/010902?q=%3Arelevance&sort=relevance&pageNumber=${currentPage}`;
+      // const url = `https://www.maxi.rs/Picje-kafa-i-chaj/Zhestoka-picja/Vodka/c/010908?q=%3Arelevance&sort=relevance&pageNumber=${currentPage}`;
+      // const url = `https://www.maxi.rs/Picje-kafa-i-chaj/Zhestoka-picja/Liker/c/010903?q=%3Arelevance&sort=relevance&pageNumber=${currentPage}`;
+      // const url = `https://www.maxi.rs/Picje-kafa-i-chaj/Zhestoka-picja/Brendi-i-konjak/c/010901?q=%3Arelevance&sort=relevance&pageNumber=${currentPage}`;
+      // const url = `https://www.maxi.rs/Picje-kafa-i-chaj/Zhestoka-picja/Tekila/c/010906?q=%3Arelevance&sort=relevance&pageNumber=${currentPage}`;
+      // const url = `https://www.maxi.rs/Picje-kafa-i-chaj/Zhestoka-picja/Rum/c/010905?q=%3Arelevance&sort=relevance&pageNumber=${currentPage}`;
+      // const url = `https://www.maxi.rs/Picje-kafa-i-chaj/Zhestoka-picja/Rakija/c/010904?q=%3Arelevance&sort=relevance&pageNumber=${currentPage}`;
+      // const url = `https://www.maxi.rs/Picje-kafa-i-chaj/Vino/Belo-vino/c/010801?q=%3Arelevance&sort=relevance&pageNumber=${currentPage}`;
+      // const url = `https://www.maxi.rs/Picje-kafa-i-chaj/Vino/Crveno-vino/c/010802?q=%3Arelevance&sort=relevance&pageNumber=${currentPage}`;
+      // const url = `https://www.maxi.rs/Picje-kafa-i-chaj/Vino/Roze-vino/c/010803?q=%3Arelevance&sort=relevance&pageNumber=${currentPage}`;
+      // const url = `https://www.maxi.rs/Picje-kafa-i-chaj/Vino/Aromatizovano-vino/c/010804?q=%3Arelevance&sort=relevance&pageNumber=${currentPage}`;
+      const url = `https://www.maxi.rs/Picje-kafa-i-chaj/Vino/Penushava-vina/c/010805?q=%3Arelevance&sort=relevance&pageNumber=${currentPage}`;
 
       console.log(`Scraping page ${currentPage}: ${url}`);
       await page.goto(url, { waitUntil: "domcontentloaded" });
@@ -74,19 +94,23 @@ async function scrapeMaxi(): Promise<ProductData[]> {
               '[data-testid="product-block-old-price"]',
             );
 
-            let numericOldPrice: number | null = null;
-
             const oldText =
               oldPriceContainer?.querySelector("span")?.textContent?.trim() ||
               "";
 
+            let numericOldPrice: number | null = null;
+
             if (oldText) {
-              const cleaned = oldText
-                .replace("RSD", "")
-                .replace(/\s+/g, "")
-                .replace(",", ".");
-              const match = cleaned.match(/(\d+(\.\d+)?)/);
-              numericOldPrice = match ? Number(match[1]) : null;
+              const match = oldText.match(/[\d.,]+/); // extract only number part
+
+              if (match) {
+                const cleaned = match[0]
+                  .replace(/\./g, "") // remove thousand separators
+                  .replace(",", "."); // convert decimal
+
+                const parsed = Number(cleaned);
+                numericOldPrice = isNaN(parsed) ? null : parsed;
+              }
             }
 
             const imageEl = tile?.querySelector(
@@ -111,7 +135,7 @@ async function scrapeMaxi(): Promise<ProductData[]> {
                 price,
                 priceBeforeDiscount: numericOldPrice,
                 store: "Maxi",
-                category: "Drinks",
+                category: "Alcohol",
                 image: imageUrl,
               });
             }

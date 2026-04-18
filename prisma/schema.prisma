@@ -12,7 +12,7 @@ model Product {
   name                  String
   normalizedName        String?
   priceBeforeDiscount   Decimal? 
-  price                 String
+  price                 String?
   store                 String
   category              String
   image                 String
@@ -37,4 +37,13 @@ model StandardizedProduct {
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
   products     Product[]
+}
+
+model Store {
+  id        Int     @id @default(autoincrement())
+  name      String
+  latitude  Float
+  longitude Float
+  address   String
+  city      String
 }

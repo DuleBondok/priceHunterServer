@@ -1,118 +1,3 @@
-import puppeteer from "puppeteer";
-
-interface Product {
-  name: string;
-  priceBeforeDiscount?: number | null;
-  price: string;
-  image: string;
-  store: string;
-  category: string;
-}
-
-export async function scrapeIdeaProducts(url: string): Promise<Product[]> {
-  const browser = await puppeteer.launch({ headless: true });
-  const page = await browser.newPage();
-
-  let allProducts: Product[] = [];
-  let pageNum = 1;
-  const MAX_PAGES = 3;
-
-  while (pageNum <= MAX_PAGES) {
-    const currentUrl = `${url}?page=${pageNum}`;
-    console.log(`Scraping page: ${currentUrl}`);
-
-    try {
-      await page.goto(currentUrl, {
-        waitUntil: "domcontentloaded",
-        timeout: 30000,
-      });
-      await page.waitForSelector(".inner-proizvod", { visible: true });
-
-      // Pass the normalize function to browser context
-      const products: Product[] = await page.evaluate(() => {
-        const data: Product[] = [];
-
-        // ✅ CHANGE: iterate over the product card that contains BOTH price and akcija-wrapper (old price)
-        const productElements = document.querySelectorAll(".proizvod");
-
-        productElements.forEach((el) => {
-          const titleElement = el.querySelector(".ime-proizvoda a");
-
-          // ✅ CHANGE: old price lives in akcija-wrapper, not inside .inner-proizvod
-          const priceBeforeDiscountElement = el.querySelector(
-            ".akcija-wrapper .stara-cijena"
-          );
-
-          const priceElement = el.querySelector(".cijena");
-          const imageElement = el.querySelector(".image img");
-
-          const title = titleElement?.textContent?.trim() ?? "";
-          let price =
-            priceElement?.textContent?.trim().replace(/\s+/g, " ") ?? "N/A";
-
-          // ✅ CHANGE: read old price text from correct place
-          const oldText =
-            priceBeforeDiscountElement?.textContent
-              ?.trim()
-              .replace(/\s+/g, " ") ?? null;
-
-          const image = imageElement?.getAttribute("ng-src") ?? "";
-
-          if (price !== "N/A") {
-            price = price.replace(" din/kom", "");
-            const numericPrice = parseFloat(price.replace(/\D/g, "")) / 100;
-            price = `${numericPrice.toFixed(2)} RSD`;
-          }
-
-          // ✅ CHANGE: parse old price formats like "363.15 din" / "363,15 din" / "... din/kom"
-          let numericOldPrice: number | null = null;
-
-          if (oldText) {
-            const cleaned = oldText
-              .replace("din/kom", "")
-              .replace("din", "")
-              .trim();
-
-            const normalized = cleaned.replace(/\s+/g, "").replace(",", ".");
-            const match = normalized.match(/(\d+(\.\d+)?)/);
-
-            numericOldPrice = match ? Number(match[1]) : null;
-          }
-
-          if (title && price && image) {
-            data.push({
-              name: title,
-              price,
-              priceBeforeDiscount: numericOldPrice,
-              image,
-              store: "Idea",
-              category: "Drinks",
-            });
-          }
-        });
-
-        return data;
-      });
-
-      if (products.length === 0) {
-        console.log(`No products found on page ${pageNum}. Stopping scrape...`);
-        break;
-      }
-
-      allProducts.push(...products);
-      pageNum++;
-    } catch (error) {
-      console.error(`Error scraping page ${currentUrl}:`, error);
-      break;
-    }
-  }
-
-  await browser.close();
-  return allProducts;
-}
-
-export async function scrapeMultipleCategories(): Promise<Product[]> {
-  const urls: string[] = [
     /*"https://online.idea.rs/#!/categories/60016184/cokoladno-mleko/products",
     "https://online.idea.rs/#!/categories/60016182/sveze-mleko/products",
     "https://online.idea.rs/#!/categories/60016183/dugotrajno-mleko/products",
@@ -155,18 +40,132 @@ export async function scrapeMultipleCategories(): Promise<Product[]> {
     "https://online.idea.rs/#!/categories/60013861/vocni-caj/products",
     "https://online.idea.rs/#!/categories/60025734/mesavine/products",
     "https://online.idea.rs/#!/categories/60025735/ostalo/products",
-    "https://online.idea.rs/#!/categories/60013825/gazirani-sokovi/products",*/
-    "https://online.idea.rs/#!/categories/60013821/energetski-i-izotonicni-napici/products"
+    "https://online.idea.rs/#!/categories/60013825/gazirani-sokovi/products",
+    "https://online.idea.rs/#!/categories/60013821/energetski-i-izotonicni-napici/products",
+    "https://online.idea.rs/#!/categories/60013826/negazirani-sokovi/products"
+    https://online.idea.rs/#!/categories/60013827/instant-sokovi/products?page=1
+    svetlo pivo, sva piva, viski, dzin, vodka, likeri, brendi i konjak, tekila, rum, rakija, belo vino, crveno vino, roze vino, vocno vino
+    penusavo vino */
+
+
+import puppeteer from "puppeteer";
+
+interface Product {
+  name: string;
+  priceBeforeDiscount?: number | null;
+  price: string;
+  image: string;
+  store: string;
+  category: string;
+}
+
+export async function scrapeIdeaProducts(urls: string[]): Promise<Product[]> {
+  const browser = await puppeteer.launch({ headless: true });
+  const page = await browser.newPage();
+
+  let allProducts: Product[] = [];
+
+  for (const currentUrl of urls) {
+    console.log(`Scraping page: ${currentUrl}`);
+
+    try {
+      await page.goto(currentUrl, {
+        waitUntil: "domcontentloaded",
+        timeout: 30000,
+      });
+
+      await page.waitForSelector(".inner-proizvod", { visible: true });
+
+      const products: Product[] = await page.evaluate(() => {
+        const data: Product[] = [];
+
+        const productElements = document.querySelectorAll(".proizvod");
+
+        productElements.forEach((el) => {
+          const titleElement = el.querySelector(".ime-proizvoda a");
+
+          const priceBeforeDiscountElement = el.querySelector(
+            ".akcija-wrapper .stara-cijena"
+          );
+
+          const priceElement = el.querySelector(".cijena");
+          const imageElement = el.querySelector(".image img");
+
+          const title = titleElement?.textContent?.trim() ?? "";
+          let price =
+            priceElement?.textContent?.trim().replace(/\s+/g, " ") ?? "N/A";
+
+          const oldText =
+            priceBeforeDiscountElement?.textContent
+              ?.trim()
+              .replace(/\s+/g, " ") ?? null;
+
+          const image = imageElement?.getAttribute("ng-src") ?? "";
+
+          if (price !== "N/A") {
+            price = price.replace(" din/kom", "");
+            const numericPrice = parseFloat(price.replace(/\D/g, "")) / 100;
+            price = `${numericPrice.toFixed(2)} RSD`;
+          }
+
+          let numericOldPrice: number | null = null;
+
+          if (oldText) {
+            const cleaned = oldText
+              .replace("din/kom", "")
+              .replace("din", "")
+              .trim();
+
+            const normalized = cleaned.replace(/\s+/g, "").replace(",", ".");
+            const match = normalized.match(/(\d+(\.\d+)?)/);
+
+            numericOldPrice = match ? Number(match[1]) : null;
+          }
+
+          if (title && price && image) {
+            data.push({
+              name: title,
+              price,
+              priceBeforeDiscount: numericOldPrice,
+              image,
+              store: "Idea",
+              category: "Alcohol",
+            });
+          }
+        });
+
+        return data;
+      });
+
+      if (products.length === 0) {
+        console.log(`No products found on page. Skipping...`);
+        continue;
+      }
+
+      allProducts.push(...products);
+    } catch (error) {
+      console.error(`Error scraping page ${currentUrl}:`, error);
+    }
+  }
+
+  await browser.close();
+  return allProducts;
+}
+
+export async function scrapeMultipleCategories(): Promise<Product[]> {
+  const urls: string[][] = [
+    [
+      "https://online.idea.rs/#!/categories/60023665/penusavo-vino/products?page=1"
+    ]
   ];
 
   const allProducts: Product[] = [];
-  const seenProducts = new Set<string>(); // Track unique products
+  const seenProducts = new Set<string>();
 
-  for (const url of urls) {
+  for (const pageUrls of urls) {
     try {
-      const products = await scrapeIdeaProducts(url);
+      const products = await scrapeIdeaProducts(pageUrls);
 
-      // Filter out duplicates before adding
       const uniqueProducts = products.filter((product) => {
         const key = `${product.name}-${product.price}`;
         if (!seenProducts.has(key)) {
@@ -177,9 +176,9 @@ export async function scrapeMultipleCategories(): Promise<Product[]> {
       });
 
       allProducts.push(...uniqueProducts);
-      console.log(`Scraped ${uniqueProducts.length} unique products from ${url}`);
+      console.log(`Scraped ${uniqueProducts.length} unique products`);
     } catch (error) {
-      console.error(`Error scraping ${url}:`, error);
+      console.error(`Error scraping category:`, error);
     }
   }
 
