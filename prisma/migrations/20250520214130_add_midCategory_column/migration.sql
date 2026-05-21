@@ -1,1 +1,1 @@
-ALTER TABLE "StandardizedProduct" ADD COLUMN "midCategory" VARCHAR(255);
+ALTER TABLE "StandardizedProduct" ADD COLUMN IF NOT EXISTS "midCategory" VARCHAR(255);

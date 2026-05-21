@@ -37,6 +37,8 @@ model StandardizedProduct {
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
   products     Product[]
+
+  @@index([mainCategory, midCategory])
 }
 
 model Store {
@@ -46,4 +48,40 @@ model Store {
   longitude Float
   address   String
   city      String
+}
+
+model ReceiptScan {
+  id                 Int      @id @default(autoincrement())
+  scannedUrl         String
+  scannedUrlHash     String
+  userEmail          String?
+  cartItemsSnapshot  Json?
+  cartTotalSnapshot  Decimal?
+  status             String   @default("pending")
+  itemConfirmations  Json?
+  confirmedBy        String?
+  confirmedAt        DateTime?
+  createdAt          DateTime @default(now())
+  purchaseGroupId    String?
+  checkoutStoreLabel String?
+
+  @@unique([scannedUrlHash])
+  @@index([createdAt])
+  @@index([userEmail])
+  @@index([status])
+  @@index([purchaseGroupId])
+}
+
+/// Email adrese prikupljene preko waiting liste (npr. newsletter / early access).
+model WaitlistEmail {
+  id        Int       @id @default(autoincrement())
+  email     String    @unique
+  createdAt DateTime  @default(now())
+  /// Kada je tim poslao odgovor ovoj adresi.
+  repliedAt DateTime?
+  /// Ko je odgovorio (npr. ime ili email člana tima).
+  repliedBy String?
+
+  @@index([createdAt])
+  @@index([repliedAt])
 }

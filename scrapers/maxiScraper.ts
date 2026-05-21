@@ -35,7 +35,8 @@ async function scrapeMaxi(): Promise<ProductData[]> {
       // const url = `https://www.maxi.rs/Picje-kafa-i-chaj/Vino/Crveno-vino/c/010802?q=%3Arelevance&sort=relevance&pageNumber=${currentPage}`;
       // const url = `https://www.maxi.rs/Picje-kafa-i-chaj/Vino/Roze-vino/c/010803?q=%3Arelevance&sort=relevance&pageNumber=${currentPage}`;
       // const url = `https://www.maxi.rs/Picje-kafa-i-chaj/Vino/Aromatizovano-vino/c/010804?q=%3Arelevance&sort=relevance&pageNumber=${currentPage}`;
-      const url = `https://www.maxi.rs/Picje-kafa-i-chaj/Vino/Penushava-vina/c/010805?q=%3Arelevance&sort=relevance&pageNumber=${currentPage}`;
+      // const url = `https://www.maxi.rs/Picje-kafa-i-chaj/Vino/Penushava-vina/c/010805?q=%3Arelevance&sort=relevance&pageNumber=${currentPage}`;
+      const url = `https://www.maxi.rs/Slatki-i-slani-konditori/c/07?q=%3Arelevance&sort=relevance&pageNumber=${currentPage}`;
 
       console.log(`Scraping page ${currentPage}: ${url}`);
       await page.goto(url, { waitUntil: "domcontentloaded" });
@@ -135,7 +136,7 @@ async function scrapeMaxi(): Promise<ProductData[]> {
                 price,
                 priceBeforeDiscount: numericOldPrice,
                 store: "Maxi",
-                category: "Alcohol",
+                category: "Sweets and Snacks",
                 image: imageUrl,
               });
             }

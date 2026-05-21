@@ -21,6 +21,9 @@
   },
   "include": [
     "src/**/*",
+    "scrapers/**/*",
+    "runIdeaCompleteScrape.ts",
+    "ideaScrapePersist.ts",
     "prismaClient.ts"
   ],
   "exclude": [

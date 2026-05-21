@@ -29,7 +29,7 @@ async function scrapeDisProducts(
       }
     });
 
-    await page.select("select", "P1");
+    await page.select("select", "H1");
 
     console.log("Waiting for category filter to apply...");
     await Promise.all([
@@ -122,7 +122,7 @@ async function scrapeDisProducts(
           price: product.price,
           image: product.image || "",
           store: "DIS",
-          category: "Alcohol",
+          category: "Groceries",
         }));
 
         // Check if productData has data

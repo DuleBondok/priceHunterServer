@@ -1,6 +1,10 @@
 import { Router, Request, Response } from "express";
 import { PrismaClient, Prisma } from "@prisma/client";
 import { addDiscountFields } from "./utils/addDiscountFields";
+import {
+  pricedProductWhere,
+  hasAtLeastOnePricedProduct,
+} from "./utils/pricedProductFilter";
 
 const prisma = new PrismaClient();
 const router = Router();
@@ -69,10 +73,11 @@ router.get("/", async (req: Request, res: Response): Promise<void> => {
 
 const matchingStandardizedProducts = await prisma.standardizedProduct.findMany({
   where: {
-    AND: andConditions,
+    AND: [...andConditions, hasAtLeastOnePricedProduct],
   },
   include: {
     products: {
+      where: pricedProductWhere,
       orderBy: { price: "asc" },
       select: {
         id: true,

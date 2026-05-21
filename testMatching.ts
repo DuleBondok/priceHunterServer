@@ -1,7 +1,44 @@
-import { PrismaClient } from '@prisma/client';
-import stringSimilarity from 'string-similarity';
+import { Prisma } from "@prisma/client";
+import prisma from "./prismaClient";
 
-const prisma = new PrismaClient();
+/** Filters for similarity search; omit a field or pass undefined = all categories on that side. */
+export type ProductMatchesFilters = {
+  standardizedMainCategory?: string;
+  productCategory?: string;
+};
+
+export type MatchCategoryMeta = {
+  standardizedMainCategories: string[];
+  productCategories: string[];
+};
+
+export async function getMatchCategoryMeta(): Promise<MatchCategoryMeta> {
+  const [standardizedRows, productRows] = await Promise.all([
+    prisma.standardizedProduct.findMany({
+      where: { mainCategory: { not: null } },
+      select: { mainCategory: true },
+      distinct: ["mainCategory"],
+    }),
+    prisma.product.findMany({
+      select: { category: true },
+      distinct: ["category"],
+    }),
+  ]);
+
+  const standardizedMainCategories = [
+    ...new Set(
+      standardizedRows
+        .map((r) => r.mainCategory)
+        .filter((c): c is string => c != null && String(c).trim() !== ""),
+    ),
+  ].sort((a, b) => a.localeCompare(b));
+
+  const productCategories = [
+    ...new Set(productRows.map((r) => r.category).filter(Boolean)),
+  ].sort((a, b) => a.localeCompare(b));
+
+  return { standardizedMainCategories, productCategories };
+}
 
 /**
  * Normalize Balkan text (čćšžđ → ascii)
@@ -19,8 +56,22 @@ function normalizeText(text: string): string {
 }
 
 /**
- * Extract ALL volumes and normalize to liters (number)
- * Handles messy strings like: 0.335KG0,355ml
+ * Token-based similarity (Jaccard)
+ */
+function tokenSimilarity(a: string, b: string): number {
+  const tokensA = new Set(a.split(' ').filter(Boolean));
+  const tokensB = new Set(b.split(' ').filter(Boolean));
+
+  if (!tokensA.size || !tokensB.size) return 0;
+
+  const intersection = [...tokensA].filter(x => tokensB.has(x)).length;
+  const union = new Set([...tokensA, ...tokensB]).size;
+
+  return intersection / union;
+}
+
+/**
+ * Extract ALL volumes and normalize to liters
  */
 function extractVolumesNormalized(text: string): number[] {
   const regex = /(\d+[.,]?\d*)(\s)?(l|ml|kg|g)/gi;
@@ -32,26 +83,20 @@ function extractVolumesNormalized(text: string): number[] {
     let amount = parseFloat(m[1].replace(',', '.'));
     let unit = m[3].toLowerCase();
 
-    if (unit === 'ml') {
-      results.push(amount / 1000);
-    } else if (unit === 'l') {
-      results.push(amount);
-    } else if (unit === 'g') {
-      // assume liquid-like products
-      results.push(amount / 1000);
-    } else if (unit === 'kg') {
-      results.push(amount);
-    }
+    if (unit === 'ml') results.push(amount / 1000);
+    else if (unit === 'l') results.push(amount);
+    else if (unit === 'g') results.push(amount / 1000);
+    else if (unit === 'kg') results.push(amount);
   }
 
   return results;
 }
 
 /**
- * Find best volume match between two arrays
+ * Smarter volume scoring (smooth decay)
  */
 function getBestVolumeScore(a: number[], b: number[]): number {
-  if (!a.length || !b.length) return 0;
+  if (!a.length || !b.length) return 0.5;
 
   let bestDiff = Infinity;
 
@@ -62,30 +107,55 @@ function getBestVolumeScore(a: number[], b: number[]): number {
     }
   }
 
-  // Convert difference to score (0–1)
-  return Math.max(0, 1 - bestDiff);
+  // exponential decay instead of hard cutoff
+  return Math.exp(-bestDiff * 3);
 }
 
-export async function getProductMatches() {
+/**
+ * Check if at least one token overlaps (cheap pre-filter)
+ */
+function hasTokenOverlap(a: string, b: string): boolean {
+  const tokensA = a.split(' ');
+  const tokensB = new Set(b.split(' '));
+
+  return tokensA.some(t => tokensB.has(t));
+}
+
+export async function getProductMatches(
+  filters: ProductMatchesFilters = {},
+): Promise<any[]> {
+  const spWhere: Prisma.StandardizedProductWhereInput = {};
+  if (filters.standardizedMainCategory?.trim()) {
+    spWhere.mainCategory = {
+      equals: filters.standardizedMainCategory.trim(),
+      mode: Prisma.QueryMode.insensitive,
+    };
+  }
+
   const allStandards = await prisma.standardizedProduct.findMany({
-    where: {
-      mainCategory: "Alkoholna Pica",
-    },
+    where: spWhere,
     include: {
       products: true,
     },
   });
 
-  const standards = allStandards.filter(
-    (sp) => sp.products.length <= 2
-  );
+  // Focus on weakly matched standards
+  const standards = allStandards.filter((sp) => sp.products.length <= 2);
+
+  const productWhere: Prisma.ProductWhereInput = {
+    standardizedProductId: null,
+  };
+  if (filters.productCategory?.trim()) {
+    productWhere.category = {
+      equals: filters.productCategory.trim(),
+      mode: Prisma.QueryMode.insensitive,
+    };
+  }
 
   const unmatchedProducts = await prisma.product.findMany({
-    where: {
-      standardizedProductId: null,
-      category: "Alcohol",
-    },
+    where: productWhere,
   });
+
 
   const matches: any[] = [];
 
@@ -93,13 +163,16 @@ export async function getProductMatches() {
     const normalizedScraped = normalizeText(scraped.name);
     const scrapedVolumes = extractVolumesNormalized(scraped.name);
 
-    let bestMatch: any = null;
-
     for (const sp of standards) {
       const combined = `${sp.brand ?? ''} ${sp.name}`;
       const normalizedCombined = normalizeText(combined);
 
-      const similarity = stringSimilarity.compareTwoStrings(
+      // 🚀 pre-filter (skip totally unrelated items)
+      if (!hasTokenOverlap(normalizedScraped, normalizedCombined)) {
+        continue;
+      }
+
+      const similarity = tokenSimilarity(
         normalizedScraped,
         normalizedCombined
       );
@@ -111,24 +184,32 @@ export async function getProductMatches() {
         spVolumes
       );
 
-      const finalScore = similarity * 0.8 + volumeScore * 0.2;
+      // brand boost
+      const brandMatch =
+        sp.brand &&
+        normalizedScraped.includes(normalizeText(sp.brand))
+          ? 1
+          : 0;
 
-      if (!bestMatch || finalScore > bestMatch.finalScore) {
-        bestMatch = {
+      const finalScore =
+        similarity * 0.65 +
+        volumeScore * 0.2 +
+        brandMatch * 0.15;
+
+      // softer threshold
+      if (finalScore > 0.45) {
+        matches.push({
           product: scraped,
           standardizedProduct: sp,
           similarity,
           volumeScore,
+          brandMatch,
           finalScore,
-        };
+        });
       }
-    }
-
-    // threshold
-    if (bestMatch && bestMatch.finalScore > 0.55) {
-      matches.push(bestMatch);
     }
   }
 
+  // sort best first
   return matches.sort((a, b) => b.finalScore - a.finalScore);
 }

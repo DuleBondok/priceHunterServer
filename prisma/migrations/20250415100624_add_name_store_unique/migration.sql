@@ -5,7 +5,8 @@
 
 */
 -- DropIndex
-DROP INDEX "Product_name_key";
+-- Idempotent: migracija 20250414133028 nikad nije uspešno primenjena (dupla imena), indeks ne mora postojati.
+DROP INDEX IF EXISTS "Product_name_key";
 
 -- CreateIndex
-CREATE UNIQUE INDEX "Product_name_store_key" ON "Product"("name", "store");
+CREATE UNIQUE INDEX IF NOT EXISTS "Product_name_store_key" ON "Product"("name", "store");

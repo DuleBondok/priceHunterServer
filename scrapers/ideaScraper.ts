@@ -45,15 +45,16 @@
     "https://online.idea.rs/#!/categories/60013826/negazirani-sokovi/products"
     https://online.idea.rs/#!/categories/60013827/instant-sokovi/products?page=1
     svetlo pivo, sva piva, viski, dzin, vodka, likeri, brendi i konjak, tekila, rum, rakija, belo vino, crveno vino, roze vino, vocno vino
-    penusavo vino */
+    penusavo vino, brasno */
 
 
 import puppeteer from "puppeteer";
+import { parseIdeaStaraCijenaRsd } from "./ideaStaraCijenaParse";
 
 interface Product {
   name: string;
   priceBeforeDiscount?: number | null;
-  price: string;
+  price: string | null;
   image: string;
   store: string;
   category: string;
@@ -76,8 +77,17 @@ export async function scrapeIdeaProducts(urls: string[]): Promise<Product[]> {
 
       await page.waitForSelector(".inner-proizvod", { visible: true });
 
-      const products: Product[] = await page.evaluate(() => {
-        const data: Product[] = [];
+      type IdeaRow = {
+        name: string;
+        price: string | null;
+        oldPriceRaw: string | null;
+        image: string;
+        store: string;
+        category: string;
+      };
+
+      const rows: IdeaRow[] = await page.evaluate(() => {
+        const data: IdeaRow[] = [];
 
         const productElements = document.querySelectorAll(".proizvod");
 
@@ -92,50 +102,43 @@ export async function scrapeIdeaProducts(urls: string[]): Promise<Product[]> {
           const imageElement = el.querySelector(".image img");
 
           const title = titleElement?.textContent?.trim() ?? "";
-          let price =
-            priceElement?.textContent?.trim().replace(/\s+/g, " ") ?? "N/A";
 
-          const oldText =
-            priceBeforeDiscountElement?.textContent
-              ?.trim()
-              .replace(/\s+/g, " ") ?? null;
+          const raw =
+            priceElement?.textContent?.trim().replace(/\s+/g, " ") ?? "";
+
+          let price: string | null = null;
+          if (raw) {
+            const cleaned = raw.replace(" din/kom", "");
+            const numericPrice = parseFloat(cleaned.replace(/\D/g, "")) / 100;
+            if (Number.isFinite(numericPrice)) {
+              price = `${numericPrice.toFixed(2)} RSD`;
+            }
+          }
+
+          const oldPriceRaw =
+            priceBeforeDiscountElement?.textContent?.trim() || null;
 
           const image = imageElement?.getAttribute("ng-src") ?? "";
 
-          if (price !== "N/A") {
-            price = price.replace(" din/kom", "");
-            const numericPrice = parseFloat(price.replace(/\D/g, "")) / 100;
-            price = `${numericPrice.toFixed(2)} RSD`;
-          }
-
-          let numericOldPrice: number | null = null;
-
-          if (oldText) {
-            const cleaned = oldText
-              .replace("din/kom", "")
-              .replace("din", "")
-              .trim();
-
-            const normalized = cleaned.replace(/\s+/g, "").replace(",", ".");
-            const match = normalized.match(/(\d+(\.\d+)?)/);
-
-            numericOldPrice = match ? Number(match[1]) : null;
-          }
-
-          if (title && price && image) {
+          if (title && image) {
             data.push({
               name: title,
               price,
-              priceBeforeDiscount: numericOldPrice,
+              oldPriceRaw,
               image,
               store: "Idea",
-              category: "Alcohol",
+              category: "Frozen products",
             });
           }
         });
 
         return data;
       });
+
+      const products: Product[] = rows.map(({ oldPriceRaw, ...rest }) => ({
+        ...rest,
+        priceBeforeDiscount: parseIdeaStaraCijenaRsd(oldPriceRaw),
+      }));
 
       if (products.length === 0) {
         console.log(`No products found on page. Skipping...`);
@@ -155,7 +158,7 @@ export async function scrapeIdeaProducts(urls: string[]): Promise<Product[]> {
 export async function scrapeMultipleCategories(): Promise<Product[]> {
   const urls: string[][] = [
     [
-      "https://online.idea.rs/#!/categories/60023665/penusavo-vino/products?page=1"
+      "https://online.idea.rs/#!/categories/60007908/smrznuta-pizza-i-gotova-jela/products?page=1"
     ]
   ];
 
