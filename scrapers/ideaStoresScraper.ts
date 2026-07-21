@@ -14,7 +14,7 @@
  * Scrape only (no DB): SKIP_DB_SAVE=1 npx ts-node scrapers/ideaStoresScraper.ts
  * Skip geocoding (fast, stores 0,0): SKIP_GEOCODE=1 npx ts-node scrapers/ideaStoresScraper.ts
  */
-import puppeteer from "puppeteer";
+import { launchBrowser } from "./puppeteerBrowser";
 import prisma from "../prismaClient";
 import {
   geocodeWithNominatim,
@@ -125,7 +125,7 @@ export async function geocodeIdeaBeogradAddresses(
 export async function scrapeIdeaStoreAddresses(
   listing: IdeaStoreListing,
 ): Promise<string[]> {
-  const browser = await puppeteer.launch({ headless: true });
+  const browser = await launchBrowser();
   const page = await browser.newPage();
   const marker = listing.tableMarker;
 

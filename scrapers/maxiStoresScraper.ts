@@ -18,7 +18,7 @@
  * Scrape only: SKIP_DB_SAVE=1 …
  * Skip geocoding: SKIP_GEOCODE=1 …
  */
-import puppeteer from "puppeteer";
+import { launchBrowser } from "./puppeteerBrowser";
 import prisma from "../prismaClient";
 import {
   geocodeWithNominatim,
@@ -280,7 +280,7 @@ async function fetchStoresViaGraphqlApi(
 export async function scrapeMaxiStores(
   config: MaxiLocatorConfig,
 ): Promise<MaxiStoreRow[]> {
-  const browser = await puppeteer.launch({ headless: true });
+  const browser = await launchBrowser();
   const page = await browser.newPage();
 
   try {

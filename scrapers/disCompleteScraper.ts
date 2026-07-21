@@ -1,4 +1,5 @@
-import puppeteer, { Browser, Page } from "puppeteer";
+import { Browser, Page } from "puppeteer";
+import { launchBrowser } from "./puppeteerBrowser";
 import { ProductData, saveProducts } from "../productService";
 
 type DisCategoryEntry = {
@@ -20,6 +21,21 @@ export const DIS_COMPLETE_CATEGORIES: DisCategoryEntry[] = [
   { code: "E1", category: "Frozen products", label: "SMRZNUTI PROZIVODI" },
   { code: "L1", category: "Groceries", label: "ZACINI I PRASKASTI PROIZVODI" },
   { code: "M1", category: "Sweets and Snacks", label: "SLATKISI I GRICKALICE" },
+  { code: "I1", category: "Bakery", label: "PEKARA" },
+  { code: "B1", category: "Meat & Fish", label: "MESNE I RIBLJE PRERADJEVINE" },
+  { code: "D1", category: "Meat & Fish", label: "MESNE I RIBLJE KONZERVE" },
+  { code: "MA", category: "Healthy Food", label: "ZDRAVA HRANA" },
+  { code: "F1", category: "Groceries", label: "PRERADA OD VOCA I POVRCA I MED" },
+  { code: "G1", category: "Fruits & Vegetables", label: "SVEZE VOCE I POVRCE" },
+  { code: "J1", category: "Groceries", label: "NAMAZI I PRILOZI" },
+  { code: "N1", category: "Drinks", label: "KAFA I OSTALI NAPICI" },
+  { code: "Q1", category: "Personal Care", label: "LICNA HIGIJENA" },
+  { code: "QB", category: "Personal Care", label: "PAPIRNA GALANTERIJA" },
+  { code: "R1", category: "Home Care", label: "KUCNA HEMIJA" },
+  { code: "S1", category: "Baby Care", label: "DECIJI I BABY PROGRAM" },
+  { code: "A1", category: "Meat & Fish", label: "SVEZE MESO I RIBA" },
+  { code: "K1", category: "Bakery", label: "GOTOVA JELA" },
+  { code: "T1", category: "Pet Care", label: "HRANA ZA ZIVOTINJE" },
 ];
 
 function parsePriceNumber(raw: string | null | undefined): number | null {
@@ -47,6 +63,37 @@ function normalizeForDedupe(value: string): string {
     .toLowerCase()
     .replace(/\s+/g, " ")
     .trim();
+}
+
+async function gotoWithRetry(
+  page: Page,
+  url: string,
+  options: Parameters<Page["goto"]>[1] = {},
+  maxAttempts = 3,
+): Promise<void> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      await page.goto(url, options);
+      return;
+    } catch (err) {
+      lastError = err;
+      const message = err instanceof Error ? err.message : String(err);
+      const retryable =
+        /ERR_INTERNET_DISCONNECTED|ERR_NETWORK_CHANGED|ERR_CONNECTION_RESET|ERR_NAME_NOT_RESOLVED|ERR_TIMED_OUT|Navigation timeout/i.test(
+          message,
+        );
+      if (!retryable || attempt === maxAttempts) {
+        throw err;
+      }
+      const delayMs = attempt * 3000;
+      console.warn(
+        `[DIS] goto failed (attempt ${attempt}/${maxAttempts}): ${message} — retry in ${delayMs}ms`,
+      );
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
+  throw lastError;
 }
 
 async function waitForProducts(page: Page): Promise<void> {
@@ -318,7 +365,7 @@ async function scrapeDisCategory(
   try {
     page.setDefaultTimeout(30000);
 
-    await page.goto(DIS_SEARCH_URL, {
+    await gotoWithRetry(page, DIS_SEARCH_URL, {
       waitUntil: "domcontentloaded",
       timeout: 60000,
     });
@@ -365,7 +412,7 @@ async function scrapeDisCategory(
 }
 
 export async function scrapeDisCompleteProducts(): Promise<ProductData[]> {
-  const browser = await puppeteer.launch({ headless: true });
+  const browser = await launchBrowser();
   const allProducts: ProductData[] = [];
 
   try {

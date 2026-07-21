@@ -1,6 +1,7 @@
+import "dotenv/config";
 import {Request, Response} from "express";
-import { Prisma, PrismaClient} from "@prisma/client";
-const prisma = new PrismaClient();
+import { Prisma } from "@prisma/client";
+import prisma from "./prismaClient";
 import express from "express";
 import cors from "cors";
 import puppeteer from "puppeteer";
@@ -14,7 +15,15 @@ import searchRoute from './searchLogic';
 import {
   getProductMatches,
   getMatchCategoryMeta,
+  getNewProductMatches,
+  getNewProductMatchCategoryMeta,
 } from "./testMatching";
+import { confirmNewProductMatch } from "./productService";
+import {
+  deleteProductById,
+  getDuplicateStoreLinks,
+  unlinkProductFromStandardized,
+} from "./duplicateStoreLinks";
 import { addDiscountFields } from "./utils/addDiscountFields";
 import {
   pricedProductWhere,
@@ -26,14 +35,168 @@ import {
   initScrapeSchedule,
   runAllCompleteScrapers,
 } from "./scrapeOrchestrator";
+import {
+  assertAdminAuthConfigured,
+  requireAdmin,
+} from "./adminAuth";
 import { normalizeReceiptScannedUrl } from "./utils/receiptQrUrl";
+import multer from "multer";
+import slugify from "slugify";
+import axios from "axios";
+import FormData from "form-data";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, resolve } from "node:path";
+
+assertAdminAuthConfigured();
+
+function parseCorsOrigins(): boolean | string[] {
+  const raw = (process.env.CORS_ORIGINS || "").trim();
+  if (!raw) {
+    // Dev: allow any. Prod default: admin + public site.
+    if (process.env.NODE_ENV !== "production") return true;
+    return [
+      "https://admin.pricely.rs",
+      "https://pricely.rs",
+      "https://www.pricely.rs",
+      "http://localhost:3000",
+    ];
+  }
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+type ImageLogEntry = {
+  productId: number;
+  productName: string;
+  brand: string | null;
+  mainCategory: string | null;
+  replacedAt: string;
+  source: "manual" | "checked" | "brand";
+};
+
+type ImageReplacementLog = Record<string, ImageLogEntry>;
+
+const IMAGE_LOG_PATH = resolve(__dirname, "scripts/imageReplacementLog.json");
+
+function ensureImageLogFile(): void {
+  const dir = dirname(IMAGE_LOG_PATH);
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true });
+  }
+  if (!existsSync(IMAGE_LOG_PATH)) {
+    writeFileSync(IMAGE_LOG_PATH, "{}", "utf8");
+  }
+}
+
+function readImageLog(): ImageReplacementLog {
+  ensureImageLogFile();
+  try {
+    const raw = readFileSync(IMAGE_LOG_PATH, "utf8");
+    const parsed = JSON.parse(raw) as unknown;
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+      ? (parsed as ImageReplacementLog)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeImageLog(log: ImageReplacementLog): void {
+  ensureImageLogFile();
+  writeFileSync(IMAGE_LOG_PATH, JSON.stringify(log, null, 2), "utf8");
+}
+
+function upsertImageLogEntry(entry: ImageLogEntry): void {
+  const log = readImageLog();
+  log[String(entry.productId)] = entry;
+  writeImageLog(log);
+}
+
+function removeImageLogEntry(productId: number): void {
+  const log = readImageLog();
+  delete log[String(productId)];
+  writeImageLog(log);
+}
+
+function buildImageLogEntry(
+  product: {
+    id: number;
+    name: string;
+    brand: string | null;
+    mainCategory: string | null;
+  },
+  source: ImageLogEntry["source"],
+): ImageLogEntry {
+  return {
+    productId: product.id,
+    productName: product.name,
+    brand: product.brand,
+    mainCategory: product.mainCategory,
+    replacedAt: new Date().toISOString(),
+    source,
+  };
+}
+
+function extractCfImageIdFromDeliveryUrl(
+  url: string | null | undefined,
+): string | null {
+  if (!url) return null;
+  const match = url.match(/imagedelivery\.net\/[^/]+\/([^/]+)\//i);
+  return match?.[1] ?? null;
+}
+
+async function deleteCfImageIfExists(
+  accountId: string,
+  imagesToken: string,
+  imageId: string,
+): Promise<void> {
+  const res = await fetch(
+    `https://api.cloudflare.com/client/v4/accounts/${accountId}/images/v1/${encodeURIComponent(imageId)}`,
+    {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${imagesToken}` },
+    },
+  );
+  if (!res.ok && res.status !== 404) {
+    const json = (await res.json().catch(() => ({}))) as {
+      errors?: { message?: string }[];
+    };
+    const detail =
+      json.errors?.map((e) => e.message).filter(Boolean).join("; ") ||
+      `status ${res.status}`;
+    console.warn(`Cloudflare delete skipped/failed for ${imageId}: ${detail}`);
+  }
+}
+
+ensureImageLogFile();
 
 const app = express();
-app.use(cors());
+app.use(
+  cors({
+    origin: parseCorsOrigins(),
+  }),
+);
 app.use(express.json());
 initScrapeSchedule();
 
-
+// Admin / scrape / match — require ADMIN_API_TOKEN when configured
+app.use("/api/admin", requireAdmin);
+app.use("/api/scraping", requireAdmin);
+app.use("/api/scrape-idea", requireAdmin);
+app.use("/api/scrape-maxi", requireAdmin);
+app.use("/api/scrape-dis", requireAdmin);
+app.use("/api/clear-db", requireAdmin);
+app.use("/matches", requireAdmin);
+app.use("/confirm-match", requireAdmin);
+app.use("/new-product-matches", requireAdmin);
+app.use("/confirm-new-product-match", requireAdmin);
 
 app.get("/", (req: Request, res: Response) => {
   res.send("Backend is running!");
@@ -278,6 +441,351 @@ app.get("/api/admin/receipt-scans", async (_req: Request, res: Response) => {
   }
 });
 
+const imageManagerUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+});
+
+app.get("/api/admin/image-manager/log", async (_req: Request, res: Response) => {
+  try {
+    res.json({ log: readImageLog() });
+  } catch (error) {
+    console.error("Error reading image replacement log:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+app.get("/api/admin/image-manager/categories", async (_req: Request, res: Response) => {
+  try {
+    const rows = await prisma.standardizedProduct.findMany({
+      where: { mainCategory: { not: null } },
+      select: { mainCategory: true },
+      distinct: ["mainCategory"],
+      orderBy: { mainCategory: "asc" },
+    });
+    const categories = rows
+      .map((r) => r.mainCategory)
+      .filter((c): c is string => Boolean(c && c.trim()));
+    res.json({ categories });
+  } catch (error) {
+    console.error("Error loading image manager categories:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+app.get("/api/admin/image-manager/brands", async (req: Request, res: Response) => {
+  try {
+    const category =
+      typeof req.query.category === "string" ? req.query.category.trim() : "";
+    if (!category) {
+      res.status(400).json({ message: "category query param is required" });
+      return;
+    }
+
+    const products = await prisma.standardizedProduct.findMany({
+      where: {
+        mainCategory: category,
+        brand: { not: null },
+      },
+      select: { id: true, brand: true },
+      orderBy: { brand: "asc" },
+    });
+
+    const log = readImageLog();
+    const brandStats: Record<
+      string,
+      { total: number; logged: number; allBrandSource: boolean }
+    > = {};
+
+    for (const product of products) {
+      if (!product.brand?.trim()) continue;
+      const brand = product.brand;
+      if (!brandStats[brand]) {
+        brandStats[brand] = { total: 0, logged: 0, allBrandSource: true };
+      }
+      brandStats[brand].total += 1;
+      const entry = log[String(product.id)];
+      if (entry) {
+        brandStats[brand].logged += 1;
+        if (entry.source !== "brand") {
+          brandStats[brand].allBrandSource = false;
+        }
+      } else {
+        brandStats[brand].allBrandSource = false;
+      }
+    }
+
+    for (const stats of Object.values(brandStats)) {
+      if (stats.total === 0 || stats.logged !== stats.total) {
+        stats.allBrandSource = false;
+      }
+    }
+
+    const brands = Object.keys(brandStats).sort((a, b) => a.localeCompare(b));
+    res.json({ brands, brandStats });
+  } catch (error) {
+    console.error("Error loading image manager brands:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+app.get("/api/admin/image-manager/search", async (req: Request, res: Response) => {
+  try {
+    const qRaw = typeof req.query.q === "string" ? req.query.q.trim() : "";
+    const category =
+      typeof req.query.category === "string" ? req.query.category.trim() : "";
+    const brand =
+      typeof req.query.brand === "string" ? req.query.brand.trim() : "";
+
+    const and: Prisma.StandardizedProductWhereInput[] = [];
+
+    if (category) {
+      and.push({ mainCategory: category });
+    }
+    if (brand) {
+      and.push({ brand });
+    }
+    if (qRaw) {
+      if (/^\d+$/.test(qRaw)) {
+        and.push({ id: Number(qRaw) });
+      } else {
+        and.push({
+          OR: [
+            { name: { contains: qRaw, mode: "insensitive" } },
+            { brand: { contains: qRaw, mode: "insensitive" } },
+          ],
+        });
+      }
+    }
+
+    if (and.length === 0) {
+      res.json({ products: [] });
+      return;
+    }
+
+    const products = await prisma.standardizedProduct.findMany({
+      where: { AND: and },
+      take: 50,
+      select: {
+        id: true,
+        name: true,
+        brand: true,
+        image: true,
+        mainCategory: true,
+      },
+      orderBy: { id: "asc" },
+    });
+
+    res.json({ products });
+  } catch (error) {
+    console.error("Error searching image manager products:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+app.post("/api/admin/image-manager/mark/:productId", async (req: Request, res: Response) => {
+  try {
+    const productId = Number(req.params.productId);
+    if (!Number.isFinite(productId) || productId <= 0) {
+      res.status(400).json({ success: false, message: "Invalid product id" });
+      return;
+    }
+
+    const checked = Boolean(req.body?.checked);
+
+    const product = await prisma.standardizedProduct.findUnique({
+      where: { id: productId },
+      select: {
+        id: true,
+        name: true,
+        brand: true,
+        mainCategory: true,
+        image: true,
+      },
+    });
+
+    if (!product) {
+      res.status(404).json({ success: false, message: "Product not found" });
+      return;
+    }
+
+    if (checked) {
+      upsertImageLogEntry(buildImageLogEntry(product, "checked"));
+    } else {
+      removeImageLogEntry(productId);
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Error marking image manager product:", error);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+app.post("/api/admin/image-manager/mark-brand", async (req: Request, res: Response) => {
+  try {
+    const brand = typeof req.body?.brand === "string" ? req.body.brand.trim() : "";
+    const category =
+      typeof req.body?.category === "string" ? req.body.category.trim() : "";
+    const checked = Boolean(req.body?.checked);
+
+    if (!brand || !category) {
+      res.status(400).json({
+        success: false,
+        message: "brand and category are required",
+      });
+      return;
+    }
+
+    const products = await prisma.standardizedProduct.findMany({
+      where: { brand, mainCategory: category },
+      select: {
+        id: true,
+        name: true,
+        brand: true,
+        mainCategory: true,
+      },
+    });
+
+    const log = readImageLog();
+
+    for (const product of products) {
+      const key = String(product.id);
+      if (checked) {
+        log[key] = buildImageLogEntry(product, "brand");
+      } else {
+        delete log[key];
+      }
+    }
+
+    writeImageLog(log);
+
+    res.json({ success: true, count: products.length });
+  } catch (error) {
+    console.error("Error marking image manager brand:", error);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+app.post(
+  "/api/admin/image-manager/upload/:productId",
+  imageManagerUpload.single("file"),
+  async (req: Request, res: Response) => {
+    try {
+      const productId = Number(req.params.productId);
+      if (!Number.isFinite(productId) || productId <= 0) {
+        res.status(400).json({ success: false, message: "Invalid product id" });
+        return;
+      }
+
+      const file = req.file;
+      if (!file?.buffer?.length) {
+        res.status(400).json({ success: false, message: 'Missing "file" upload' });
+        return;
+      }
+
+      const accountId = process.env.CLOUDFLARE_ACCOUNT_ID?.trim();
+      const imagesToken = process.env.CLOUDFLARE_IMAGES_TOKEN?.trim();
+      const deliveryBase = process.env.CLOUDFLARE_IMAGE_DELIVERY_URL?.trim();
+
+      if (!accountId || !imagesToken || !deliveryBase) {
+        res.status(500).json({
+          success: false,
+          message:
+            "Missing CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_IMAGES_TOKEN, or CLOUDFLARE_IMAGE_DELIVERY_URL",
+        });
+        return;
+      }
+
+      const product = await prisma.standardizedProduct.findUnique({
+        where: { id: productId },
+        select: {
+          id: true,
+          name: true,
+          brand: true,
+          mainCategory: true,
+          image: true,
+        },
+      });
+
+      if (!product) {
+        res.status(404).json({ success: false, message: "Product not found" });
+        return;
+      }
+
+      const nameSlug = slugify(product.name, {
+        lower: true,
+        strict: true,
+        trim: true,
+      });
+      const cfImageId = `product-${product.id}-${nameSlug || "image"}`;
+      const existingCfImageId = extractCfImageIdFromDeliveryUrl(product.image);
+
+      for (const imageId of new Set(
+        [existingCfImageId, cfImageId].filter((id): id is string => Boolean(id)),
+      )) {
+        await deleteCfImageIfExists(accountId, imagesToken, imageId);
+      }
+
+      const cfForm = new FormData();
+      cfForm.append("file", file.buffer, {
+        filename: file.originalname || "upload.png",
+        contentType: file.mimetype || "application/octet-stream",
+      });
+      cfForm.append("id", cfImageId);
+      cfForm.append(
+        "metadata",
+        JSON.stringify({
+          standardizedProductId: product.id,
+          previousImage: product.image,
+        }),
+      );
+
+      const cfUpload = await axios.post<{
+        success?: boolean;
+        errors?: { message?: string }[];
+      }>(
+        `https://api.cloudflare.com/client/v4/accounts/${accountId}/images/v1`,
+        cfForm,
+        {
+          headers: {
+            Authorization: `Bearer ${imagesToken}`,
+            ...cfForm.getHeaders(),
+          },
+          maxBodyLength: Infinity,
+          maxContentLength: Infinity,
+          validateStatus: () => true,
+        },
+      );
+
+      const cfJson = cfUpload.data;
+
+      if (cfUpload.status < 200 || cfUpload.status >= 300 || !cfJson.success) {
+        const detail =
+          cfJson.errors?.map((e) => e.message).filter(Boolean).join("; ") ||
+          `Cloudflare upload failed (${cfUpload.status})`;
+        res.status(502).json({ success: false, message: detail });
+        return;
+      }
+
+      const deliveryBaseClean = deliveryBase.replace(/\/$/, "");
+      const newImageUrl = `${deliveryBaseClean}/${cfImageId}/public`;
+
+      await prisma.standardizedProduct.update({
+        where: { id: productId },
+        data: { image: newImageUrl },
+      });
+
+      upsertImageLogEntry(buildImageLogEntry(product, "manual"));
+
+      res.json({ success: true, newImageUrl });
+    } catch (error) {
+      console.error("Error uploading image manager file:", error);
+      res.status(500).json({ success: false, message: "Internal server error" });
+    }
+  },
+);
+
 app.patch("/api/admin/receipt-scans/:id/confirm", async (req: Request, res: Response) => {
   try {
     const id = Number(req.params.id);
@@ -378,7 +886,6 @@ app.get('/api/scrape-idea', async (req: Request, res: Response): Promise<void> =
       res.status(500).json({ success: false, error: err.message });
   } finally {
       isScraping = false;
-      await prisma.$disconnect();
   }
 });
 
@@ -419,12 +926,24 @@ app.get("/api/scraping/runs", async (_req: Request, res: Response) => {
 
 app.post("/api/scraping/run-now", async (_req: Request, res: Response) => {
   try {
-    const result = await runAllCompleteScrapers("manual");
-    if (!result.ok) {
-      res.status(409).json({ success: false, message: result.reason });
+    if (getScrapeStatus().isRunning) {
+      res.status(409).json({
+        success: false,
+        message: "A scrape run is already in progress",
+      });
       return;
     }
-    res.json({ success: true, run: result.run });
+
+    // Do not await the full ~1h run — client polls /api/scraping/status
+    void runAllCompleteScrapers("manual").then((result) => {
+      if (!result.ok) {
+        console.error("Manual scrape finished with failure:", result.reason);
+      }
+    }).catch((error) => {
+      console.error("Manual scrape run failed:", error);
+    });
+
+    res.status(202).json({ success: true, started: true });
   } catch (error) {
     console.error("Manual scrape run failed:", error);
     res.status(500).json({ success: false, message: "Manual run failed" });
@@ -432,6 +951,16 @@ app.post("/api/scraping/run-now", async (_req: Request, res: Response) => {
 });
 
 app.delete('/api/clear-db', async (req, res) => {
+  if (
+    process.env.NODE_ENV === "production" &&
+    process.env.ALLOW_CLEAR_DB !== "true"
+  ) {
+    res.status(403).json({
+      success: false,
+      error: "clear-db is disabled in production (set ALLOW_CLEAR_DB=true to override)",
+    });
+    return;
+  }
   try {
     await clearDatabase();
     console.log('✅ Database cleared successfully');
@@ -469,12 +998,14 @@ app.get("/matches", async (req, res) => {
     const productCategory = parseOptionalCategoryQuery(
       req.query.productCategory,
     );
+    const store = parseOptionalCategoryQuery(req.query.store);
 
-    const matches = await getProductMatches({
+    const result = await getProductMatches({
       standardizedMainCategory,
       productCategory,
+      store,
     });
-    res.json(matches);
+    res.json(result);
   } catch (error) {
     console.error("Error getting matches:", error);
     res.status(500).json({ error: "Internal Server Error" });
@@ -497,6 +1028,129 @@ app.post('/confirm-match', async (req, res) => {
     res.status(500).json({ error: 'Internal error' });
   }
 });
+
+app.get("/new-product-matches/meta", async (_req, res) => {
+  try {
+    const meta = await getNewProductMatchCategoryMeta();
+    res.json(meta);
+  } catch (error) {
+    console.error("Error getting new product match category meta:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+app.get("/new-product-matches", async (req, res) => {
+  try {
+    const standardizedMainCategory = parseOptionalCategoryQuery(
+      req.query.standardizedMainCategory,
+    );
+    const productCategory = parseOptionalCategoryQuery(
+      req.query.productCategory,
+    );
+    const store = parseOptionalCategoryQuery(req.query.store);
+
+    const result = await getNewProductMatches({
+      standardizedMainCategory,
+      productCategory,
+      store,
+    });
+    res.json(result);
+  } catch (error) {
+    console.error("Error getting new product matches:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+app.post("/confirm-new-product-match", async (req, res) => {
+  const newProductId = Number(req.body?.newProductId);
+  const standardizedProductId = Number(req.body?.standardizedProductId);
+
+  if (
+    !Number.isFinite(newProductId) ||
+    newProductId <= 0 ||
+    !Number.isFinite(standardizedProductId) ||
+    standardizedProductId <= 0
+  ) {
+    res.status(400).json({
+      error: "Missing or invalid newProductId or standardizedProductId",
+    });
+    return;
+  }
+
+  try {
+    const result = await confirmNewProductMatch(
+      newProductId,
+      standardizedProductId,
+    );
+    res.json({
+      message: "New product promoted and linked.",
+      productId: result.product.id,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Internal error";
+    console.error("confirm-new-product-match:", err);
+    const status = message.includes("not found") ? 404 : 400;
+    res.status(status).json({ error: message });
+  }
+});
+
+app.get("/api/admin/duplicate-store-links", async (req: Request, res: Response) => {
+  try {
+    const store = parseOptionalCategoryQuery(req.query.store);
+    const result = await getDuplicateStoreLinks({ store });
+    res.json(result);
+  } catch (error) {
+    console.error("Error loading duplicate store links:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+app.post("/api/admin/duplicate-store-links/unlink", async (req: Request, res: Response) => {
+  const productId = Number(req.body?.productId);
+  if (!Number.isFinite(productId) || productId <= 0) {
+    res.status(400).json({ error: "Missing or invalid productId" });
+    return;
+  }
+
+  try {
+    const result = await unlinkProductFromStandardized(productId);
+    res.json({
+      message: result.alreadyUnlinked
+        ? "Product was already unlinked."
+        : "Product unlinked from StandardizedProduct.",
+      productId: result.product.id,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Internal error";
+    console.error("unlink duplicate store link:", err);
+    const status = message.includes("not found") ? 404 : 400;
+    res.status(status).json({ error: message });
+  }
+});
+
+app.delete(
+  "/api/admin/duplicate-store-links/product/:productId",
+  async (req: Request, res: Response) => {
+    const productId = Number(req.params.productId);
+    if (!Number.isFinite(productId) || productId <= 0) {
+      res.status(400).json({ error: "Missing or invalid productId" });
+      return;
+    }
+
+    try {
+      const result = await deleteProductById(productId);
+      res.json({
+        message: "Product deleted.",
+        deleted: result.deleted,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Internal error";
+      console.error("delete duplicate store link product:", err);
+      const status = message.includes("not found") ? 404 : 400;
+      res.status(status).json({ error: message });
+    }
+  },
+);
 
 app.get("/api/products/:category", async (req: Request, res: Response): Promise<void> => {
   const { category } = req.params;
@@ -636,5 +1290,5 @@ app.get(
 app.use('/api/search', searchRoute);
 
 
-const PORT = 5000;
+const PORT = Number(process.env.PORT) || 5000;
 app.listen(PORT, () => console.log(`Server running on Port ${PORT}`));

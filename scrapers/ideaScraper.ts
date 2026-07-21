@@ -48,7 +48,7 @@
     penusavo vino, brasno */
 
 
-import puppeteer from "puppeteer";
+import { launchBrowser } from "./puppeteerBrowser";
 import { parseIdeaStaraCijenaRsd } from "./ideaStaraCijenaParse";
 
 interface Product {
@@ -58,10 +58,12 @@ interface Product {
   image: string;
   store: string;
   category: string;
+  requiresLoyaltyCard?: boolean;
+  offerEndsOn?: string | null;
 }
 
 export async function scrapeIdeaProducts(urls: string[]): Promise<Product[]> {
-  const browser = await puppeteer.launch({ headless: true });
+  const browser = await launchBrowser();
   const page = await browser.newPage();
 
   let allProducts: Product[] = [];
@@ -84,9 +86,32 @@ export async function scrapeIdeaProducts(urls: string[]): Promise<Product[]> {
         image: string;
         store: string;
         category: string;
+        requiresLoyaltyCard: boolean;
+        offerEndsOn: string | null;
       };
 
       const rows: IdeaRow[] = await page.evaluate(() => {
+        function isIdeaMpcOffer(el: Element): boolean {
+          const akcija = el.querySelector(".akcija.text-center");
+          const bg = el.querySelector(".akcija-background");
+          return !!(
+            akcija?.classList.contains("mpc") ||
+            akcija?.classList.contains("mpc2") ||
+            bg?.classList.contains("mpc-background") ||
+            bg?.classList.contains("mpc2-background")
+          );
+        }
+
+        function getIdeaOfferEndDate(el: Element): string | null {
+          const span = el.querySelector(
+            ".trajanje-akcije span[ng-switch-when='true']",
+          );
+          if (!span) return null;
+          const text = span.textContent?.trim() ?? "";
+          const match = text.match(/(\d{2}\.\d{2}\.\d{4})/);
+          return match ? match[1] : null;
+        }
+
         const data: IdeaRow[] = [];
 
         const productElements = document.querySelectorAll(".proizvod");
@@ -119,6 +144,8 @@ export async function scrapeIdeaProducts(urls: string[]): Promise<Product[]> {
             priceBeforeDiscountElement?.textContent?.trim() || null;
 
           const image = imageElement?.getAttribute("ng-src") ?? "";
+          const mpcOffer = isIdeaMpcOffer(el);
+          const offerEndsOn = getIdeaOfferEndDate(el);
 
           if (title && image) {
             data.push({
@@ -128,6 +155,8 @@ export async function scrapeIdeaProducts(urls: string[]): Promise<Product[]> {
               image,
               store: "Idea",
               category: "Frozen products",
+              requiresLoyaltyCard: mpcOffer,
+              offerEndsOn,
             });
           }
         });

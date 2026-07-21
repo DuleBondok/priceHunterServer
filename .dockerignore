@@ -1,0 +1,16 @@
+# Ignore build context noise
+.git
+.gitignore
+.dockerignore
+.env
+.env.*
+!.env.example
+node_modules
+.cache
+.next
+backups
+db_backups
+*.sql
+*.log
+tsconfig.tsbuildinfo
+generated

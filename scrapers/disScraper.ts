@@ -1,4 +1,5 @@
-import puppeteer, { Browser, Page } from "puppeteer";
+import { Browser, Page } from "puppeteer";
+import { launchBrowser } from "./puppeteerBrowser";
 import { saveProducts } from "../productService";
 
 interface Product {
@@ -11,7 +12,7 @@ interface Product {
 async function scrapeDisProducts(
   url: string = "https://www.dis.rs/pretraga?type=artikli&query=",
 ): Promise<Product[]> {
-  const browser: Browser = await puppeteer.launch({ headless: true });
+  const browser: Browser = await launchBrowser();
   const page: Page = await browser.newPage();
 
   try {
@@ -29,7 +30,7 @@ async function scrapeDisProducts(
       }
     });
 
-    await page.select("select", "H1");
+    await page.select("select", "A1");
 
     console.log("Waiting for category filter to apply...");
     await Promise.all([
@@ -122,7 +123,7 @@ async function scrapeDisProducts(
           price: product.price,
           image: product.image || "",
           store: "DIS",
-          category: "Groceries",
+          category: "Meat & Fish",
         }));
 
         // Check if productData has data

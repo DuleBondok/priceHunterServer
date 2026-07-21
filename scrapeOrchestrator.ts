@@ -2,12 +2,15 @@ import { promises as fs } from "fs";
 import path from "path";
 import { spawn } from "child_process";
 import cron from "node-cron";
+import { scraperProcessEnv } from "./scrapers/puppeteerEnv";
 
 type StepStatus = "success" | "failed";
 type RunStatus = "running" | "success" | "partial" | "failed";
 
+type ScrapeStore = "Idea" | "Maxi" | "DIS" | "Univerexport";
+
 export type ScrapeRunStep = {
-  store: "Idea" | "Maxi" | "DIS";
+  store: ScrapeStore;
   startedAt: string;
   finishedAt: string;
   durationMs: number;
@@ -56,7 +59,7 @@ let activeRunLiveState: {
   runId: string;
   trigger: "manual" | "scheduled";
   startedAt: string;
-  currentStore?: "Idea" | "Maxi" | "DIS";
+  currentStore?: ScrapeStore;
   currentCommand?: string;
   currentStepStartedAt?: string;
   currentStepLogs: string[];
@@ -78,6 +81,11 @@ const SCRAPER_STEPS = [
     store: "DIS" as const,
     command: "npx",
     args: ["ts-node", "scrapers/disCompleteScraper.ts"],
+  },
+  {
+    store: "Univerexport" as const,
+    command: "npx",
+    args: ["ts-node", "scrapers/univerexportCompleteScraper.ts"],
   },
 ];
 
@@ -106,7 +114,7 @@ async function writeRuns(runs: ScrapeRun[]): Promise<void> {
 }
 
 function runScraperStep(
-  store: "Idea" | "Maxi" | "DIS",
+  store: ScrapeStore,
   command: string,
   args: string[],
   onLog?: (line: string) => void,
@@ -118,7 +126,7 @@ function runScraperStep(
     const child = spawn(command, args, {
       cwd: BACKEND_ROOT,
       shell: process.platform === "win32",
-      env: process.env,
+      env: scraperProcessEnv(),
     });
 
     const addLog = (chunk: Buffer) => {
@@ -174,9 +182,18 @@ function extractFinalInfoFromLogs(
   | undefined {
   const joined = logs.join("\n");
 
-  // productService format: "Created: X, Updated: Y, Price cleared: P, Total: Z"
+  // productService format (legacy): "Created: X, Updated: Y, Price cleared: P, Total: Z"
   const createdUpdatedClearedTotal = joined.match(
     /Created:\s*(\d+),\s*Updated:\s*(\d+),\s*Price cleared:\s*(\d+),\s*Total:\s*(\d+)/i,
+  );
+
+  // productService availability format (legacy)
+  const createdUpdatedMissingHidden = joined.match(
+    /Created:\s*(\d+),\s*Updated:\s*(\d+),\s*Missing marked:\s*(\d+),\s*Hidden \(14d\+\):\s*(\d+),\s*Total:\s*(\d+)/i,
+  );
+
+  const productNewProductsMissingHidden = joined.match(
+    /Product updated:\s*(\d+),\s*NewProducts created:\s*(\d+),\s*NewProducts updated:\s*(\d+),\s*Missing marked:\s*(\d+),\s*Hidden \(14d\+\):\s*(\d+),\s*Products in DB:\s*(\d+)/i,
   );
 
   // Legacy productService format: "Created: X, Updated: Y, Total: Z"
@@ -184,7 +201,17 @@ function extractFinalInfoFromLogs(
     /Created:\s*(\d+),\s*Updated:\s*(\d+),\s*Total:\s*(\d+)/i,
   );
 
-  // idea persist (with price cleared)
+  // idea persist (NewProducts staging)
+  const ideaPersistNewProducts = joined.match(
+    /Scraped\s*(\d+)\s*rows\s*[^\d]*(\d+)\s*new \(NewProducts\),\s*(\d+)\s*NewProducts updated,\s*(\d+)\s*Product updates/i,
+  );
+
+  // idea persist (availability — legacy)
+  const ideaPersistAvail = joined.match(
+    /Scraped\s*(\d+)\s*rows\s*[^\d]*(\d+)\s*new,\s*(\d+)\s*price updates,\s*(\d+)\s*missing this run,\s*(\d+)\s*hidden \(14d\+\),\s*(\d+)\s*products in DB/i,
+  );
+
+  // idea persist (with price cleared — legacy)
   const ideaPersistNew = joined.match(
     /Scraped\s*(\d+)\s*rows\s*[^\d]*(\d+)\s*new,\s*(\d+)\s*price updates,\s*(\d+)\s*price cleared,\s*(\d+)\s*products in DB/i,
   );
@@ -197,6 +224,9 @@ function extractFinalInfoFromLogs(
   // Generic scrape totals:
   const disCollected = joined.match(/\[DIS\]\s*Total collected:\s*(\d+)/i);
   const maxiCollected = joined.match(/Total products collected:\s*(\d+)/i);
+  const univerexportCollected = joined.match(
+    /\[Univerexport\]\s*Total collected:\s*(\d+)/i,
+  );
 
   const info: {
     scraped?: number;
@@ -206,7 +236,17 @@ function extractFinalInfoFromLogs(
     totalInDb?: number;
   } = {};
 
-  if (createdUpdatedClearedTotal) {
+  if (productNewProductsMissingHidden) {
+    info.updated = Number(productNewProductsMissingHidden[1]);
+    info.created = Number(productNewProductsMissingHidden[2]);
+    info.priceCleared = Number(productNewProductsMissingHidden[4]);
+    info.totalInDb = Number(productNewProductsMissingHidden[6]);
+  } else if (createdUpdatedMissingHidden) {
+    info.created = Number(createdUpdatedMissingHidden[1]);
+    info.updated = Number(createdUpdatedMissingHidden[2]);
+    info.priceCleared = Number(createdUpdatedMissingHidden[3]);
+    info.totalInDb = Number(createdUpdatedMissingHidden[5]);
+  } else if (createdUpdatedClearedTotal) {
     info.created = Number(createdUpdatedClearedTotal[1]);
     info.updated = Number(createdUpdatedClearedTotal[2]);
     info.priceCleared = Number(createdUpdatedClearedTotal[3]);
@@ -217,7 +257,17 @@ function extractFinalInfoFromLogs(
     info.totalInDb = Number(createdUpdatedTotal[3]);
   }
 
-  if (ideaPersistNew) {
+  if (ideaPersistNewProducts) {
+    info.scraped = Number(ideaPersistNewProducts[1]);
+    info.created = Number(ideaPersistNewProducts[2]);
+    info.updated = Number(ideaPersistNewProducts[4]);
+  } else if (ideaPersistAvail) {
+    info.scraped = Number(ideaPersistAvail[1]);
+    info.created = Number(ideaPersistAvail[2]);
+    info.updated = Number(ideaPersistAvail[3]);
+    info.priceCleared = Number(ideaPersistAvail[4]);
+    info.totalInDb = Number(ideaPersistAvail[6]);
+  } else if (ideaPersistNew) {
     info.scraped = Number(ideaPersistNew[1]);
     info.created = Number(ideaPersistNew[2]);
     info.updated = Number(ideaPersistNew[3]);
@@ -236,6 +286,10 @@ function extractFinalInfoFromLogs(
 
   if (info.scraped == null && maxiCollected) {
     info.scraped = Number(maxiCollected[1]);
+  }
+
+  if (info.scraped == null && univerexportCollected) {
+    info.scraped = Number(univerexportCollected[1]);
   }
 
   if (
@@ -370,7 +424,7 @@ export function getScrapeStatus(): {
     runId: string;
     trigger: "manual" | "scheduled";
     startedAt: string;
-    currentStore?: "Idea" | "Maxi" | "DIS";
+    currentStore?: ScrapeStore;
     currentCommand?: string;
     currentStepStartedAt?: string;
     currentStepLogs: string[];

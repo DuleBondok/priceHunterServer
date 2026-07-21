@@ -26,13 +26,19 @@ export async function saveIdeaScrapeResults(
   }
 
   try {
-    const { created, updated, priceCleared, totalInDb } =
-      await saveProducts(products, {
-        clearMissingForStore: true,
-        clearMissingOnlyForCategories: IDEA_CLEAR_CATEGORIES,
-      });
+    const {
+      created,
+      updated,
+      newProductsUpdated,
+      missingMarked,
+      availabilityHidden,
+      totalInDb,
+    } = await saveProducts(products, {
+      clearMissingForStore: true,
+      clearMissingOnlyForCategories: IDEA_CLEAR_CATEGORIES,
+    });
     console.log(
-      `Done. Scraped ${products.length} rows → ${created} new, ${updated} price updates, ${priceCleared} price cleared, ${totalInDb} products in DB.`,
+      `Done. Scraped ${products.length} rows → ${created} new (NewProducts), ${newProductsUpdated} NewProducts updated, ${updated} Product updates, ${missingMarked} missing this run, ${availabilityHidden} hidden (14d+), ${totalInDb} products in DB.`,
     );
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);

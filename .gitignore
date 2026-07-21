@@ -1,3 +1,14 @@
 node_modules
+.cache/
 # Keep environment variables out of version control
 .env
+
+# Local dumps / noise — do not push to GitHub / Render
+*.sql
+*.log
+backups/
+db_backups/
+.next/
+generated/
+tsconfig.tsbuildinfo
+data/scrape-runs.json

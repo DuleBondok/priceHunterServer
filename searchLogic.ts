@@ -1,12 +1,12 @@
 import { Router, Request, Response } from "express";
-import { PrismaClient, Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
+import prisma from "./prismaClient";
 import { addDiscountFields } from "./utils/addDiscountFields";
 import {
   pricedProductWhere,
   hasAtLeastOnePricedProduct,
 } from "./utils/pricedProductFilter";
 
-const prisma = new PrismaClient();
 const router = Router();
 
 // Helper to expand Serbian variants

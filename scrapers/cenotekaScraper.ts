@@ -1,7 +1,7 @@
+import "./puppeteerEnv";
 import puppeteer from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
-import { PrismaClient } from '@prisma/client';
-const prisma = new PrismaClient();
+import prisma from "../prismaClient";
 
 puppeteer.use(StealthPlugin());
 
@@ -58,27 +58,19 @@ function extractVolumeFromName(name: string): string | null {
 
 // Brand keyword mapping
 const brandMap: Record<string, string> = {
-  "Rice Cakes": "Rice Cakes",
-  Benlian: "Benlian",
-  "Rice Up": "Rice Up",
-  "What snack": "What snack",
-  "Active Zone": "Active Zone",
-  "Nature's Promise": "Nature's Promise",
-  "Boom Box": "Boom Box",
-  "Dr.Oetker": "Dr. Oetker",
-  Dobra: "Dobra",
-  Vitalia: "Vitalia",
-  "Fun & Fit": "Fun & Fit",
-  "Nutrino Lab": "Nutrino Lab",
-  "Sweetfit": "Sweetfit",
-  Emma: "Emma",
-  "Top Food": "Top Food",
-  Sanaterra: "Sanaterra",
-  Superfood: "Superfood",
-  Slavuj: "Slavuj",
-  Lumpi: "Lumpi",
+  Carnex: "Carnex",
+  Marbo: "Marbo",
+  Neoplanta: "Neoplanta",
+  Yumis: "Yumis",
+  Abc: "ABC",
   Podravka: "Podravka",
-  "Kit Kat": "Kit Kat",
+  Benlian: "Benlian",
+  "K Plus": "K Plus",
+  Minute: "Minute",
+  Condeli: "Condeli",
+  Premia: "Maxi",
+  Gustona: "Gustona",
+
 
 
 };
@@ -135,9 +127,9 @@ async function scrapeCentotekaProducts(url: string): Promise<standardizedProduct
 
     return {
       name: name,
-      mainCategory: "Zdrava hrana",
-      midCategory: "Pahuljice i musli",
-      subCategory: "Musli",
+      mainCategory: "Namirnice",
+      midCategory: "Gotova jela",
+      subCategory: "",
       brand,
       volume,
       image: p.image,
@@ -149,8 +141,7 @@ async function scrapeCentotekaProducts(url: string): Promise<standardizedProduct
   return formatted;
 }
 
-// Example usage
-scrapeCentotekaProducts("https://cenoteka.rs/musli/p/4/").then(async (products) => {
+scrapeCentotekaProducts("https://cenoteka.rs/gotova-jela/p/3/").then(async (products) => {
   console.log(products);
   await saveProducts(products);
   console.log("Products saved to DB");

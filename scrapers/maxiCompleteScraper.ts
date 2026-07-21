@@ -1,5 +1,7 @@
-import puppeteer, { Page } from "puppeteer";
+import { Page } from "puppeteer";
+import { launchBrowser } from "./puppeteerBrowser";
 import { saveProducts, ProductData } from "../productService";
+import { parseIdeaStaraCijenaRsd } from "./ideaStaraCijenaParse";
 
 // 🔹 Add all category base URLs here (WITHOUT pageNumber value)
 const CATEGORY_URLS = [
@@ -127,6 +129,33 @@ const CATEGORY_URLS = [
     url: `https://www.maxi.rs/Meso-mesne-i-riblje-preradjevine/c/04?q=%3Arelevance&sort=relevance&pageNumber=`,
     category: "Meat & Fish",
   },
+
+      {
+    url: `https://www.maxi.rs/Zdravija-hrana/c/09?q=%3Arelevance&sort=relevance&pageNumber=`,
+    category: "Healthy Food",
+  },
+        {
+    url: `https://www.maxi.rs/Lichna-higijena-i-kozmetika/c/14?q=%3Arelevance&sort=relevance&pageNumber=`,
+    category: "Personal Care",
+  },
+  {
+    url: `https://www.maxi.rs/Kucjna-hemija-i-papirna-galanterija/c/13?q=%3Arelevance&sort=relevance&pageNumber=`,
+    category: "Home Care",
+  },
+   {
+    url: `https://www.maxi.rs/Bebi-svet/c/15?q=%3Arelevance&sort=relevance&pageNumber=`,
+    category: "Baby Care",
+  },
+     {
+    url: `https://www.maxi.rs/Gotova-i-polugotova-jela/c/10?q=%3Arelevance&sort=relevance&pageNumber=`,
+    category: "Groceries",
+  },
+     {
+    url: `https://www.maxi.rs/Kucjni-ljubimci/c/11?q=%3Arelevance&sort=relevance&pageNumber=`,
+    category: "Pet Care",
+  },
+  
+  
 ];
 
 const PRODUCT_TILE_SELECTOR = '[data-testid="product-tile-footer"]';
@@ -158,9 +187,13 @@ async function enableFastAssetBlocking(page: Page): Promise<void> {
   });
 }
 
+type ScrapedMaxiRow = Omit<ProductData, "priceBeforeDiscount"> & {
+  oldPriceRaw: string | null;
+};
+
 async function extractProducts(page: Page): Promise<ProductData[]> {
-  return page.evaluate(() => {
-    const products: ProductData[] = [];
+  const rows = await page.evaluate(() => {
+    const products: ScrapedMaxiRow[] = [];
 
     document
       .querySelectorAll('[data-testid="product-tile-footer"]')
@@ -218,23 +251,8 @@ async function extractProducts(page: Page): Promise<ProductData[]> {
           '[data-testid="product-block-old-price"]',
         );
 
-        const oldText =
-          oldPriceContainer?.querySelector("span")?.textContent?.trim() || "";
-
-        let numericOldPrice: number | null = null;
-
-        if (oldText) {
-          const match = oldText.match(/[\d.,]+/);
-
-          if (match) {
-            const cleaned = match[0]
-              .replace(/\./g, "")
-              .replace(",", ".");
-
-            const parsed = Number(cleaned);
-            numericOldPrice = isNaN(parsed) ? null : parsed;
-          }
-        }
+        const oldPriceRaw =
+          oldPriceContainer?.querySelector("span")?.textContent?.trim() || null;
 
         const imageEl = tile?.querySelector(
           'img[data-testid="product-block-image"]',
@@ -256,7 +274,7 @@ async function extractProducts(page: Page): Promise<ProductData[]> {
           products.push({
             name: fullName,
             price: price === "N/A" ? null : price,
-            priceBeforeDiscount: numericOldPrice,
+            oldPriceRaw,
             store: "Maxi",
             category: "",
             image: imageUrl,
@@ -266,6 +284,11 @@ async function extractProducts(page: Page): Promise<ProductData[]> {
 
     return products;
   });
+
+  return rows.map(({ oldPriceRaw, ...rest }) => ({
+    ...rest,
+    priceBeforeDiscount: parseIdeaStaraCijenaRsd(oldPriceRaw),
+  }));
 }
 
 /** Load PLP and read tiles; retries page 1 when the grid hydrates late (common under parallel tabs). */
@@ -352,10 +375,7 @@ async function scrapeCategory(
 
 // 🔹 Main function (runs ALL categories)
 async function scrapeMaxi(): Promise<ProductData[]> {
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: ["--disable-dev-shm-usage"],
-  });
+  const browser = await launchBrowser();
 
   const allResults: ProductData[] = [];
 

@@ -1,4 +1,5 @@
-import puppeteer, { Page } from "puppeteer";
+import { Page } from "puppeteer";
+import { launchBrowser } from "./puppeteerBrowser";
 import { parseIdeaStaraCijenaRsd } from "./ideaStaraCijenaParse";
 
 interface Product {
@@ -8,6 +9,8 @@ interface Product {
   image: string;
   store: string;
   category: string;
+  requiresLoyaltyCard?: boolean;
+  offerEndsOn?: string | null;
 }
 
 export type IdeaListingEntry = {
@@ -176,6 +179,98 @@ export const IDEA_COMPLETE_LISTINGS: IdeaListingEntry[] = [
   { url: "https://online.idea.rs/#!/categories/60025674/kroasani-i-rolati/products?page=1", category: "Sweets and Snacks" },
   { url: "https://online.idea.rs/#!/categories/60025675/gotove-torte/products?page=1", category: "Sweets and Snacks" },
   { url: "https://online.idea.rs/#!/categories/60025676/gotovi-kolaci/products?page=1", category: "Sweets and Snacks" },
+  { url: "https://online.idea.rs/#!/categories/60019578/galete-i-plocice/products?page=1", category: "Healthy Food" },
+  { url: "https://online.idea.rs/#!/categories/60019579/pahuljice-i-semenke/products?page=1", category: "Healthy Food" },
+  { url: "https://online.idea.rs/#!/categories/60019580/napici-i-sokovi/products?page=1", category: "Healthy Food" },
+  { url: "https://online.idea.rs/#!/categories/60019581/namirnice-za-pripremu-jela/products?page=1", category: "Healthy Food" },
+  { url: "https://online.idea.rs/#!/categories/60020304/orasasti-plodovi/products?page=1", category: "Healthy Food" },
+  { url: "https://online.idea.rs/#!/categories/60019582/zdraviji-namazi/products?page=1", category: "Healthy Food" },
+  { url: "https://online.idea.rs/#!/categories/60019583/slatkisi-i-grickalice/products?page=1", category: "Healthy Food" },
+  { url: "https://online.idea.rs/#!/categories/60019587/gluten-free/products?page=1", category: "Healthy Food" },
+  { url: "https://online.idea.rs/#!/categories/60019588/sugar-free/products?page=1", category: "Healthy Food" },
+  { url: "https://online.idea.rs/#!/categories/60019589/veganski-proizvodi/products?page=1", category: "Healthy Food" },
+  { url: "https://online.idea.rs/#!/categories/60019590/mahunarke-i-semenke/products?page=1", category: "Healthy Food" },
+  { url: "https://online.idea.rs/#!/categories/60019591/dorucak-i-namazi/products?page=1", category: "Healthy Food" },
+  { url: "https://online.idea.rs/#!/categories/60019592/priprema-jela/products?page=1", category: "Healthy Food" },
+  { url: "https://online.idea.rs/#!/categories/60019593/organski-napici-kafa-i-caj/products?page=1", category: "Healthy Food" },
+  { url: "https://online.idea.rs/#!/categories/60019594/slatkisi-i-grickalice/products?page=1", category: "Healthy Food" },
+  { url: "https://online.idea.rs/#!/categories/60019596/barovi/products?page=1", category: "Healthy Food" },
+  { url: "https://online.idea.rs/#!/categories/60019597/proteini/products?page=1", category: "Healthy Food" },
+  { url: "https://online.idea.rs/#!/categories/60012085/to-go/products?page=1", category: "Healthy Food" },
+  { url: "https://online.idea.rs/#!/categories/60012084/suvo-voce/products?page=1", category: "Healthy Food" },
+  { url: "https://online.idea.rs/#!/categories/60008386/namazi-i-pastete/products?page=1", category: "Healthy Food" },
+  { url: "https://online.idea.rs/#!/categories/60020848/sportska-hrana/products?page=1", category: "Healthy Food" },
+  { url: "https://online.idea.rs/#!/categories/60020847/sportski-napici/products?page=1", category: "Healthy Food" },
+  { url: "https://online.idea.rs/#!/categories/60020849/sportski-dodaci/products?page=1", category: "Healthy Food" },
+  { url: "https://online.idea.rs/#!/categories/60025779/muska-kozmetika-brijaci-i-aparati/products?page=1", category: "Personal Care" },
+  { url: "https://online.idea.rs/#!/categories/60025780/zenski-brijaci/products?page=1", category: "Personal Care" },
+  { url: "https://online.idea.rs/#!/categories/60025781/proizvodi-za-depilaciju/products?page=1", category: "Personal Care" },
+  { url: "https://online.idea.rs/#!/categories/60014497/toalet-papir/products?page=1", category: "Personal Care" },
+  { url: "https://online.idea.rs/#!/categories/60014498/ubrusi/products?page=1", category: "Personal Care" },
+  { url: "https://online.idea.rs/#!/categories/60014499/salvete/products?page=1", category: "Personal Care" },
+  { url: "https://online.idea.rs/#!/categories/60014500/papirne-maramice/products?page=1", category: "Personal Care" },
+  { url: "https://online.idea.rs/#!/categories/60029187/paloma/products?page=1", category: "Personal Care" },
+  { url: "https://online.idea.rs/#!/categories/60007849/ulosci-i-intimna-nega/products?page=1", category: "Personal Care" },
+  { url: "https://online.idea.rs/#!/categories/60007847/flasteri/products?page=1", category: "Personal Care" },
+  { url: "https://online.idea.rs/#!/categories/60007850/vata-tuferi-stapici-za-usi/products?page=1", category: "Personal Care" },
+  { url: "https://online.idea.rs/#!/categories/60007857/samponi/products?page=1", category: "Personal Care" },
+  { url: "https://online.idea.rs/#!/categories/60007855/regeneratori-i-maske-za-kosu/products?page=1", category: "Personal Care" },
+  { url: "https://online.idea.rs/#!/categories/60007854/boje-za-kosu/products?page=1", category: "Personal Care" },
+  { url: "https://online.idea.rs/#!/categories/60007856/stilizovanje-kose/products?page=1", category: "Personal Care" },
+  { url: "https://online.idea.rs/#!/categories/60007859/kreme-i-maske-za-lice/products?page=1", category: "Personal Care" },
+  { url: "https://online.idea.rs/#!/categories/60007860/mleka-i-losioni-za-lice/products?page=1", category: "Personal Care" },
+  { url: "https://online.idea.rs/#!/categories/60007861/nega-usana/products?page=1", category: "Personal Care" },
+  { url: "https://online.idea.rs/#!/categories/60007864/dezodoransi/products?page=1", category: "Personal Care" },
+  { url: "https://online.idea.rs/#!/categories/60007865/kreme-mleka-losioni/products?page=1", category: "Personal Care" },
+  { url: "https://online.idea.rs/#!/categories/60007866/nega-stopala/products?page=1", category: "Personal Care" },
+  { url: "https://online.idea.rs/#!/categories/60007868/pene-i-gelovi-za-tusiranje/products?page=1", category: "Personal Care" },
+  { url: "https://online.idea.rs/#!/categories/60007869/sapuni/products?page=1", category: "Personal Care" },
+  { url: "https://online.idea.rs/#!/categories/60025772/standardne-cetkice/products?page=1", category: "Personal Care" },
+  { url: "https://online.idea.rs/#!/categories/60007872/konac-tecnost-ostalo/products?page=1", category: "Personal Care" },
+  { url: "https://online.idea.rs/#!/categories/60007873/paste/products?page=1", category: "Personal Care" },
+  { url: "https://online.idea.rs/#!/categories/60011601/prirodna-kozmetika/products?page=1", category: "Personal Care" },
+  { url: "https://online.idea.rs/#!/categories/60011801/zdravoteka/products?page=1", category: "Personal Care" },
+  { url: "https://online.idea.rs/#!/categories/60007874/parfemi-i-setovi/products?page=1", category: "Personal Care" },
+  { url: "https://online.idea.rs/#!/categories/60016209/praskasti-deterdzent/products?page=1", category: "Home Care" },
+  { url: "https://online.idea.rs/#!/categories/60016210/tecni-deterdzent/products?page=1", category: "Home Care" },
+  { url: "https://online.idea.rs/#!/categories/60016211/kapsule/products?page=1", category: "Home Care" },
+  { url: "https://online.idea.rs/#!/categories/60016213/rucno-pranje-eco-sapuni/products?page=1", category: "Home Care" },
+  { url: "https://online.idea.rs/#!/categories/60007774/odrzavanje-masine/products?page=1", category: "Home Care" },
+  { url: "https://online.idea.rs/#!/categories/60007775/odstranjivanje-fleka/products?page=1", category: "Home Care" },
+  { url: "https://online.idea.rs/#!/categories/60025849/omeksivaci/products?page=1", category: "Home Care" },
+  { url: "https://online.idea.rs/#!/categories/60025850/oplemenjivaci/products?page=1", category: "Home Care" },
+  { url: "https://online.idea.rs/#!/categories/60016205/rucno-pranje/products?page=1", category: "Home Care" },
+  { url: "https://online.idea.rs/#!/categories/60016206/masinsko-pranje/products?page=1", category: "Home Care" },
+  { url: "https://online.idea.rs/#!/categories/60016218/ciscenje-kuhinje/products?page=1", category: "Home Care" },
+  { url: "https://online.idea.rs/#!/categories/60016219/ciscenje-kupatila/products?page=1", category: "Home Care" },
+  { url: "https://online.idea.rs/#!/categories/60016220/ciscenje-namestaja-i-podova/products?page=1", category: "Home Care" },
+  { url: "https://online.idea.rs/#!/categories/60025857/ciscenje-stakala/products?page=1", category: "Home Care" },
+  { url: "https://online.idea.rs/#!/categories/60016221/sredstva-za-dezinfekciju-i-univerzalna-sredstva/products?page=1", category: "Home Care" },
+  { url: "https://online.idea.rs/#!/categories/60021712/eco-sredstva-za-ciscenje/products?page=1", category: "Home Care" },
+  { url: "https://online.idea.rs/#!/categories/60016227/sunderi-krpe-zice-i-rukavice/products?page=1", category: "Home Care" },
+  { url: "https://online.idea.rs/#!/categories/60016228/metle-kante-cetke/products?page=1", category: "Home Care" },
+  { url: "https://online.idea.rs/#!/categories/60007770/nega-obuce/products?page=1", category: "Home Care" },
+  { url: "https://online.idea.rs/#!/categories/60014461/insekticidi/products?page=1", category: "Home Care" },
+  { url: "https://online.idea.rs/#!/categories/60014462/osvezivaci-prostora/products?page=1", category: "Home Care" },
+  { url: "https://online.idea.rs/#!/categories/60014463/wc-osvezivaci/products?page=1", category: "Home Care" },
+  { url: "https://online.idea.rs/#!/categories/60014469/kese/products?page=1", category: "Home Care" },
+  { url: "https://online.idea.rs/#!/categories/60014470/folije-papir-za-pecenje-i-cackalice/products?page=1", category: "Home Care" },
+  { url: "https://online.idea.rs/#!/categories/60014719/pelene/products?page=1", category: "Baby Care" },
+  { url: "https://online.idea.rs/#!/categories/60014720/decije-vlazne-maramice/products?page=1", category: "Baby Care" },
+  { url: "https://online.idea.rs/#!/categories/60025843/zamensko-mleko/products?page=1", category: "Baby Care" },
+  { url: "https://online.idea.rs/#!/categories/60025844/instant-kase/products?page=1", category: "Baby Care" },
+  { url: "https://online.idea.rs/#!/categories/60025846/gotove-kasice-teglice-i-pauch/products?page=1", category: "Baby Care" },
+  { url: "https://online.idea.rs/#!/categories/60025847/deciji-sokovi-i-ostala-hrana/products?page=1", category: "Baby Care" },
+  { url: "https://online.idea.rs/#!/categories/60007764/decija-nega-i-kozmetika/products?page=1", category: "Baby Care" },
+  { url: "https://online.idea.rs/#!/categories/60007765/deterdzenti-i-omeksivaci/products?page=1", category: "Baby Care" },
+  { url: "https://online.idea.rs/#!/categories/60012833/suva-hrana-za-pse/products?page=1", category: "Pet Care" },
+  { url: "https://online.idea.rs/#!/categories/60012834/vlazna-hrana-za-pse/products?page=1", category: "Pet Care" },
+  { url: "https://online.idea.rs/#!/categories/60012838/dentali-i-snackovi/products?page=1", category: "Pet Care" },
+  { url: "https://online.idea.rs/#!/categories/60012839/suva-hrana-za-macke/products?page=1", category: "Pet Care" },
+  { url: "https://online.idea.rs/#!/categories/60012840/vlazna-hrana-za-macke/products?page=1", category: "Pet Care" },
+  { url: "https://online.idea.rs/#!/categories/60012841/poslastice-za-macke/products?page=1", category: "Pet Care" },
+  { url: "https://online.idea.rs/#!/categories/60030488/pribor-i-kozmetika/products?page=1", category: "Pet Care" },
+
 
 ];
 
@@ -287,7 +382,7 @@ export async function scrapeIdeaProducts(
 ): Promise<Product[]> {
   const listings = [...IDEA_COMPLETE_LISTINGS];
 
-  const browser = await puppeteer.launch({ headless: true });
+  const browser = await launchBrowser();
 
   let allProducts: Product[] = [];
 
@@ -330,9 +425,32 @@ export async function scrapeIdeaProducts(
           image: string;
           store: string;
           category: string;
+          requiresLoyaltyCard: boolean;
+          offerEndsOn: string | null;
         };
 
         const rows: IdeaRow[] = await page.evaluate((categoryName) => {
+          function isIdeaMpcOffer(el: Element): boolean {
+            const akcija = el.querySelector(".akcija.text-center");
+            const bg = el.querySelector(".akcija-background");
+            return !!(
+              akcija?.classList.contains("mpc") ||
+              akcija?.classList.contains("mpc2") ||
+              bg?.classList.contains("mpc-background") ||
+              bg?.classList.contains("mpc2-background")
+            );
+          }
+
+          function getIdeaOfferEndDate(el: Element): string | null {
+            const span = el.querySelector(
+              ".trajanje-akcije span[ng-switch-when='true']",
+            );
+            if (!span) return null;
+            const text = span.textContent?.trim() ?? "";
+            const match = text.match(/(\d{2}\.\d{2}\.\d{4})/);
+            return match ? match[1] : null;
+          }
+
           const data: IdeaRow[] = [];
 
           const productElements = document.querySelectorAll(".proizvod");
@@ -366,6 +484,8 @@ export async function scrapeIdeaProducts(
               priceBeforeDiscountElement?.textContent?.trim() || null;
 
             const image = imageElement?.getAttribute("ng-src") ?? "";
+            const mpcOffer = isIdeaMpcOffer(el);
+            const offerEndsOn = getIdeaOfferEndDate(el);
 
             if (title && image) {
               data.push({
@@ -375,6 +495,8 @@ export async function scrapeIdeaProducts(
                 image,
                 store: "Idea",
                 category: categoryName,
+                requiresLoyaltyCard: mpcOffer,
+                offerEndsOn,
               });
             }
           });

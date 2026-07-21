@@ -1,0 +1,27 @@
+# Pricely ops: admin API + scheduled scrapers
+# Connect this repo (priceHunterServer) in Render → New Web Service → Docker
+services:
+  - type: web
+    name: pricely-ops
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: ADMIN_API_TOKEN
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_DATABASE_URL
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: CF_ACCOUNT_ID
+        sync: false
+      - key: CF_IMAGES_TOKEN
+        sync: false
+      - key: CF_IMAGES_HASH
+        sync: false

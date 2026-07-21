@@ -16,12 +16,42 @@ model Product {
   store                 String
   category              String
   image                 String
+  lastSeenAt            DateTime             @default(now())
+  isAvailable           Boolean              @default(true)
+  consecutiveMissingDays Int                 @default(0)
+  flaggedForReview      Boolean              @default(false)
+  flaggedReason         String?
+  flaggedAt             DateTime?
+  requiresLoyaltyCard   Boolean              @default(false)
+  offerEndsOn           String?
   createdAt             DateTime             @default(now())
   updatedAt             DateTime             @updatedAt
   standardizedProductId Int?
   standardizedProduct   StandardizedProduct? @relation(fields: [standardizedProductId], references: [id])
 
   @@unique([normalizedName, store], name: "normalizedName_store")
+  @@index([lastSeenAt])
+  @@index([isAvailable])
+  @@index([flaggedForReview])
+}
+
+/// Scraped products not yet promoted to Product (pending review).
+model NewProducts {
+  id                  Int       @id @default(autoincrement())
+  name                String
+  normalizedName      String
+  price               String?
+  priceBeforeDiscount Decimal?
+  store               String
+  category            String
+  image               String
+  firstSeenAt         DateTime  @default(now())
+  lastSeenAt          DateTime  @default(now())
+  processedAt         DateTime?
+
+  @@unique([normalizedName, store])
+  @@index([store])
+  @@index([processedAt])
 }
 
 model StandardizedProduct {
@@ -32,8 +62,9 @@ model StandardizedProduct {
   midCategory  String?
   subCategory  String?
   brand        String?
-  volume       String?
-  attributes   Json?
+  volume             String?
+  productDescription String?
+  attributes         Json?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
   products     Product[]
@@ -84,4 +115,30 @@ model WaitlistEmail {
 
   @@index([createdAt])
   @@index([repliedAt])
+}
+
+model UncoveredLocationPing {
+  id        String   @id @default(cuid())
+  lat       Float
+  lng       Float
+  reason    String
+  mode      String?
+  createdAt DateTime @default(now())
+}
+
+model StoreFieldAudit {
+  id                    Int       @id @default(autoincrement())
+  standardizedProductId Int
+  store                 String
+  isAvailable           Boolean?
+  priceCorrect          Boolean?
+  correctedPrice        String?
+  dbPriceSnapshot       String?
+  notes                 String?
+  checkedAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@unique([standardizedProductId, store])
+  @@index([store])
+  @@index([checkedAt])
 }

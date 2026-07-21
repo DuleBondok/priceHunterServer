@@ -17,6 +17,8 @@ export function isDisplayableProductPrice(
  */
 export const pricedProductWhere: Prisma.ProductWhereInput = {
   AND: [
+    { flaggedForReview: false },
+    { isAvailable: true },
     { price: { not: null } },
     { NOT: { price: { equals: "" } } },
     {

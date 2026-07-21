@@ -1,149 +1,361 @@
 import { Prisma } from "@prisma/client";
 import prisma from "./prismaClient";
+import {
+  buildStandardizedTokenIndex,
+  candidateStandardizedIds,
+  computeMatchScore,
+  linkedStoreCount,
+  MAX_STORE_LINKS_PER_STANDARD,
+  MIN_WEAK_MATCH_SCORE,
+  scoreProductMatch,
+} from "./matchingUtils";
 
-/** Filters for similarity search; omit a field or pass undefined = all categories on that side. */
+/** Max rows returned per request (one row per eligible unmatched product when under cap). */
+export const MATCHES_PAGE_LIMIT = 15000;
+
 export type ProductMatchesFilters = {
   standardizedMainCategory?: string;
   productCategory?: string;
+  store?: string;
+  limit?: number;
+};
+
+export type ProductMatchRow = {
+  product: {
+    id: number;
+    name: string;
+    category: string;
+    store: string;
+    image: string;
+    price: string | null;
+  };
+  standardizedProduct: {
+    id: number;
+    name: string;
+    brand: string | null;
+    volume: string | null;
+    image: string;
+    mainCategory: string | null;
+  } | null;
+  similarity: number;
+  fuzzyScore: number;
+  volumeScore: number;
+  brandMatch: number;
+  categoryScore: number;
+  finalScore: number;
+  lowConfidence: boolean;
+  /** Best-effort match below normal confidence threshold. */
+  weakSuggestion?: boolean;
+  /** No standardized product candidate met even the weak threshold. */
+  noSuggestion?: boolean;
+};
+
+export type ProductMatchesResult = {
+  matches: ProductMatchRow[];
+  /** Unmatched products considered (same as product filter). */
+  eligible: number;
+  /** Rows with a normal suggestion (finalScore >= MIN_MATCH_SCORE). */
+  withSuggestion: number;
+  /** Rows with only a weak best-effort suggestion. */
+  weakSuggestion: number;
+  /** Rows with no suggestion at all. */
+  withoutSuggestion: number;
+  total: number;
+  limit: number;
+  truncated: boolean;
 };
 
 export type MatchCategoryMeta = {
   standardizedMainCategories: string[];
   productCategories: string[];
+  stores: string[];
+  maxStoreLinksPerStandard: number;
 };
 
-export async function getMatchCategoryMeta(): Promise<MatchCategoryMeta> {
-  const [standardizedRows, productRows] = await Promise.all([
-    prisma.standardizedProduct.findMany({
-      where: { mainCategory: { not: null } },
-      select: { mainCategory: true },
-      distinct: ["mainCategory"],
-    }),
-    prisma.product.findMany({
-      select: { category: true },
-      distinct: ["category"],
-    }),
-  ]);
+type ScrapedMatchRow = ProductMatchRow["product"];
 
-  const standardizedMainCategories = [
-    ...new Set(
-      standardizedRows
-        .map((r) => r.mainCategory)
-        .filter((c): c is string => c != null && String(c).trim() !== ""),
-    ),
-  ].sort((a, b) => a.localeCompare(b));
+type StandardForMatch = {
+  id: number;
+  name: string;
+  brand: string | null;
+  volume: string | null;
+  image: string | null;
+  mainCategory: string | null;
+  products: { id: number; store: string }[];
+};
 
-  const productCategories = [
-    ...new Set(productRows.map((r) => r.category).filter(Boolean)),
-  ].sort((a, b) => a.localeCompare(b));
-
-  return { standardizedMainCategories, productCategories };
+function distinctSorted(values: string[]): string[] {
+  return [...new Set(values.filter((v) => v && String(v).trim() !== ""))].sort(
+    (a, b) => a.localeCompare(b),
+  );
 }
 
-/**
- * Normalize Balkan text (čćšžđ → ascii)
- */
-function normalizeText(text: string): string {
-  return text
-    .toLowerCase()
-    .replace(/[čć]/g, 'c')
-    .replace(/[š]/g, 's')
-    .replace(/[ž]/g, 'z')
-    .replace(/[đ]/g, 'dj')
-    .replace(/[^a-z0-9]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-/**
- * Token-based similarity (Jaccard)
- */
-function tokenSimilarity(a: string, b: string): number {
-  const tokensA = new Set(a.split(' ').filter(Boolean));
-  const tokensB = new Set(b.split(' ').filter(Boolean));
-
-  if (!tokensA.size || !tokensB.size) return 0;
-
-  const intersection = [...tokensA].filter(x => tokensB.has(x)).length;
-  const union = new Set([...tokensA, ...tokensB]).size;
-
-  return intersection / union;
-}
-
-/**
- * Extract ALL volumes and normalize to liters
- */
-function extractVolumesNormalized(text: string): number[] {
-  const regex = /(\d+[.,]?\d*)(\s)?(l|ml|kg|g)/gi;
-  const matches = [...text.matchAll(regex)];
-
-  const results: number[] = [];
-
-  for (const m of matches) {
-    let amount = parseFloat(m[1].replace(',', '.'));
-    let unit = m[3].toLowerCase();
-
-    if (unit === 'ml') results.push(amount / 1000);
-    else if (unit === 'l') results.push(amount);
-    else if (unit === 'g') results.push(amount / 1000);
-    else if (unit === 'kg') results.push(amount);
-  }
-
-  return results;
-}
-
-/**
- * Smarter volume scoring (smooth decay)
- */
-function getBestVolumeScore(a: number[], b: number[]): number {
-  if (!a.length || !b.length) return 0.5;
-
-  let bestDiff = Infinity;
-
-  for (const v1 of a) {
-    for (const v2 of b) {
-      const diff = Math.abs(v1 - v2);
-      if (diff < bestDiff) bestDiff = diff;
-    }
-  }
-
-  // exponential decay instead of hard cutoff
-  return Math.exp(-bestDiff * 3);
-}
-
-/**
- * Check if at least one token overlaps (cheap pre-filter)
- */
-function hasTokenOverlap(a: string, b: string): boolean {
-  const tokensA = a.split(' ');
-  const tokensB = new Set(b.split(' '));
-
-  return tokensA.some(t => tokensB.has(t));
-}
-
-export async function getProductMatches(
-  filters: ProductMatchesFilters = {},
-): Promise<any[]> {
+async function loadStandardsForMatching(
+  standardizedMainCategory?: string,
+): Promise<{
+  standards: StandardForMatch[];
+  standardsById: Map<number, StandardForMatch>;
+  allStandardIds: number[];
+  tokenIndex: ReturnType<typeof buildStandardizedTokenIndex>;
+}> {
   const spWhere: Prisma.StandardizedProductWhereInput = {};
-  if (filters.standardizedMainCategory?.trim()) {
+  if (standardizedMainCategory?.trim()) {
     spWhere.mainCategory = {
-      equals: filters.standardizedMainCategory.trim(),
+      equals: standardizedMainCategory.trim(),
       mode: Prisma.QueryMode.insensitive,
     };
   }
 
   const allStandards = await prisma.standardizedProduct.findMany({
     where: spWhere,
-    include: {
-      products: true,
+    select: {
+      id: true,
+      name: true,
+      brand: true,
+      volume: true,
+      image: true,
+      mainCategory: true,
+      products: { select: { id: true, store: true } },
     },
   });
 
-  // Focus on weakly matched standards
-  const standards = allStandards.filter((sp) => sp.products.length <= 2);
+  const standards = allStandards.filter(
+    (sp) => linkedStoreCount(sp.products) < MAX_STORE_LINKS_PER_STANDARD,
+  );
+
+  return {
+    standards,
+    standardsById: new Map(standards.map((sp) => [sp.id, sp])),
+    allStandardIds: standards.map((sp) => sp.id),
+    tokenIndex: buildStandardizedTokenIndex(standards),
+  };
+}
+
+function buildMatchesForScrapedRows(
+  unmatchedProducts: ScrapedMatchRow[],
+  standards: StandardForMatch[],
+  standardsById: Map<number, StandardForMatch>,
+  allStandardIds: number[],
+  tokenIndex: ReturnType<typeof buildStandardizedTokenIndex>,
+  limit: number,
+): ProductMatchesResult {
+  const matches: ProductMatchRow[] = [];
+  let withSuggestion = 0;
+  let weakSuggestionCount = 0;
+  let withoutSuggestion = 0;
+
+  for (const scraped of unmatchedProducts) {
+    const candidateIds = candidateStandardizedIds(
+      scraped.name,
+      tokenIndex,
+      allStandardIds,
+    );
+
+    let bestSp: StandardForMatch | null = null;
+    let bestScored: NonNullable<ReturnType<typeof scoreProductMatch>> | null =
+      null;
+    let weakSp: StandardForMatch | null = null;
+    let weakScored: NonNullable<ReturnType<typeof scoreProductMatch>> | null =
+      null;
+
+    for (const spId of candidateIds) {
+      const sp = standardsById.get(spId);
+      if (!sp) continue;
+      if (sp.products.some((p) => p.store === scraped.store)) continue;
+
+      const scored = scoreProductMatch({
+        scrapedName: scraped.name,
+        scrapedCategory: scraped.category,
+        standardizedBrand: sp.brand,
+        standardizedName: sp.name,
+        standardizedVolume: sp.volume,
+        standardizedMainCategory: sp.mainCategory,
+      });
+
+      if (
+        scored &&
+        (!bestScored || scored.finalScore > bestScored.finalScore)
+      ) {
+        bestSp = sp;
+        bestScored = scored;
+      }
+
+      const weak = computeMatchScore(
+        {
+          scrapedName: scraped.name,
+          scrapedCategory: scraped.category,
+          standardizedBrand: sp.brand,
+          standardizedName: sp.name,
+          standardizedVolume: sp.volume,
+          standardizedMainCategory: sp.mainCategory,
+        },
+        { relaxed: true, minScore: MIN_WEAK_MATCH_SCORE },
+      );
+
+      if (weak && (!weakScored || weak.finalScore > weakScored.finalScore)) {
+        weakSp = sp;
+        weakScored = weak;
+      }
+    }
+
+    if (bestSp && bestScored) {
+      matches.push({
+        product: scraped,
+        standardizedProduct: {
+          id: bestSp.id,
+          name: bestSp.name,
+          brand: bestSp.brand,
+          volume: bestSp.volume,
+          image: bestSp.image ?? "",
+          mainCategory: bestSp.mainCategory,
+        },
+        similarity: bestScored.similarity,
+        fuzzyScore: bestScored.fuzzyScore,
+        volumeScore: bestScored.volumeScore,
+        brandMatch: bestScored.brandMatch,
+        categoryScore: bestScored.categoryScore,
+        finalScore: bestScored.finalScore,
+        lowConfidence: bestScored.finalScore < 0.62,
+      });
+      withSuggestion++;
+    } else if (weakSp && weakScored) {
+      matches.push({
+        product: scraped,
+        standardizedProduct: {
+          id: weakSp.id,
+          name: weakSp.name,
+          brand: weakSp.brand,
+          volume: weakSp.volume,
+          image: weakSp.image ?? "",
+          mainCategory: weakSp.mainCategory,
+        },
+        similarity: weakScored.similarity,
+        fuzzyScore: weakScored.fuzzyScore,
+        volumeScore: weakScored.volumeScore,
+        brandMatch: weakScored.brandMatch,
+        categoryScore: weakScored.categoryScore,
+        finalScore: weakScored.finalScore,
+        lowConfidence: true,
+        weakSuggestion: true,
+      });
+      weakSuggestionCount++;
+    } else {
+      matches.push({
+        product: scraped,
+        standardizedProduct: null,
+        similarity: 0,
+        fuzzyScore: 0,
+        volumeScore: 0,
+        brandMatch: 0,
+        categoryScore: 0,
+        finalScore: 0,
+        lowConfidence: true,
+        noSuggestion: true,
+      });
+      withoutSuggestion++;
+    }
+  }
+
+  matches.sort((a, b) => {
+    if (a.noSuggestion !== b.noSuggestion) return a.noSuggestion ? 1 : -1;
+    if (a.weakSuggestion !== b.weakSuggestion) return a.weakSuggestion ? 1 : -1;
+    return b.finalScore - a.finalScore;
+  });
+
+  const eligible = unmatchedProducts.length;
+  const total = matches.length;
+  const truncated = total > limit;
+
+  return {
+    matches: truncated ? matches.slice(0, limit) : matches,
+    eligible,
+    withSuggestion,
+    weakSuggestion: weakSuggestionCount,
+    withoutSuggestion,
+    total,
+    limit,
+    truncated,
+  };
+}
+
+type MetaKindRow = { kind: string; value: string | null };
+
+function metaFromRows(rows: MetaKindRow[]): Omit<MatchCategoryMeta, "maxStoreLinksPerStandard"> {
+  const standardizedMainCategories: string[] = [];
+  const productCategories: string[] = [];
+  const stores: string[] = [];
+
+  for (const row of rows) {
+    const value = row.value?.trim();
+    if (!value) continue;
+    if (row.kind === "sp_main") standardizedMainCategories.push(value);
+    else if (row.kind === "cat" && value !== ">") productCategories.push(value);
+    else if (row.kind === "store") stores.push(value);
+  }
+
+  return {
+    standardizedMainCategories: distinctSorted(standardizedMainCategories),
+    productCategories: distinctSorted(productCategories),
+    stores: distinctSorted(stores),
+  };
+}
+
+export async function getMatchCategoryMeta(): Promise<MatchCategoryMeta> {
+  const rows = await prisma.$queryRaw<MetaKindRow[]>`
+    SELECT 'sp_main'::text AS kind, "mainCategory"::text AS value
+    FROM "StandardizedProduct"
+    WHERE "mainCategory" IS NOT NULL AND TRIM("mainCategory") <> ''
+    UNION ALL
+    SELECT 'cat'::text, category::text
+    FROM "Product"
+    WHERE category IS NOT NULL AND TRIM(category) <> '' AND category <> '>'
+    UNION ALL
+    SELECT 'store'::text, store::text
+    FROM "Product"
+    WHERE store IS NOT NULL AND TRIM(store) <> ''
+  `;
+
+  return {
+    ...metaFromRows(rows),
+    maxStoreLinksPerStandard: MAX_STORE_LINKS_PER_STANDARD,
+  };
+}
+
+export async function getNewProductMatchCategoryMeta(): Promise<MatchCategoryMeta> {
+  const rows = await prisma.$queryRaw<MetaKindRow[]>`
+    SELECT 'sp_main'::text AS kind, "mainCategory"::text AS value
+    FROM "StandardizedProduct"
+    WHERE "mainCategory" IS NOT NULL AND TRIM("mainCategory") <> ''
+    UNION ALL
+    SELECT 'cat'::text, category::text
+    FROM "NewProducts"
+    WHERE "processedAt" IS NULL AND category IS NOT NULL AND TRIM(category) <> '' AND category <> '>'
+    UNION ALL
+    SELECT 'store'::text, store::text
+    FROM "NewProducts"
+    WHERE "processedAt" IS NULL AND store IS NOT NULL AND TRIM(store) <> ''
+  `;
+
+  return {
+    ...metaFromRows(rows),
+    maxStoreLinksPerStandard: MAX_STORE_LINKS_PER_STANDARD,
+  };
+}
+
+export async function getProductMatches(
+  filters: ProductMatchesFilters = {},
+): Promise<ProductMatchesResult> {
+  const limit = Math.max(
+    1,
+    Math.min(filters.limit ?? MATCHES_PAGE_LIMIT, MATCHES_PAGE_LIMIT),
+  );
+
+  const { standards, standardsById, allStandardIds, tokenIndex } =
+    await loadStandardsForMatching(filters.standardizedMainCategory);
 
   const productWhere: Prisma.ProductWhereInput = {
     standardizedProductId: null,
+    category: { not: ">" },
   };
   if (filters.productCategory?.trim()) {
     productWhere.category = {
@@ -151,65 +363,81 @@ export async function getProductMatches(
       mode: Prisma.QueryMode.insensitive,
     };
   }
+  if (filters.store?.trim()) {
+    productWhere.store = {
+      equals: filters.store.trim(),
+      mode: Prisma.QueryMode.insensitive,
+    };
+  }
 
   const unmatchedProducts = await prisma.product.findMany({
     where: productWhere,
+    select: {
+      id: true,
+      name: true,
+      category: true,
+      store: true,
+      image: true,
+      price: true,
+    },
   });
 
+  return buildMatchesForScrapedRows(
+    unmatchedProducts,
+    standards,
+    standardsById,
+    allStandardIds,
+    tokenIndex,
+    limit,
+  );
+}
 
-  const matches: any[] = [];
+export async function getNewProductMatches(
+  filters: ProductMatchesFilters = {},
+): Promise<ProductMatchesResult> {
+  const limit = Math.max(
+    1,
+    Math.min(filters.limit ?? MATCHES_PAGE_LIMIT, MATCHES_PAGE_LIMIT),
+  );
 
-  for (const scraped of unmatchedProducts) {
-    const normalizedScraped = normalizeText(scraped.name);
-    const scrapedVolumes = extractVolumesNormalized(scraped.name);
+  const { standards, standardsById, allStandardIds, tokenIndex } =
+    await loadStandardsForMatching(filters.standardizedMainCategory);
 
-    for (const sp of standards) {
-      const combined = `${sp.brand ?? ''} ${sp.name}`;
-      const normalizedCombined = normalizeText(combined);
-
-      // 🚀 pre-filter (skip totally unrelated items)
-      if (!hasTokenOverlap(normalizedScraped, normalizedCombined)) {
-        continue;
-      }
-
-      const similarity = tokenSimilarity(
-        normalizedScraped,
-        normalizedCombined
-      );
-
-      const spVolumes = extractVolumesNormalized(sp.volume ?? '');
-
-      const volumeScore = getBestVolumeScore(
-        scrapedVolumes,
-        spVolumes
-      );
-
-      // brand boost
-      const brandMatch =
-        sp.brand &&
-        normalizedScraped.includes(normalizeText(sp.brand))
-          ? 1
-          : 0;
-
-      const finalScore =
-        similarity * 0.65 +
-        volumeScore * 0.2 +
-        brandMatch * 0.15;
-
-      // softer threshold
-      if (finalScore > 0.45) {
-        matches.push({
-          product: scraped,
-          standardizedProduct: sp,
-          similarity,
-          volumeScore,
-          brandMatch,
-          finalScore,
-        });
-      }
-    }
+  const newProductWhere: Prisma.NewProductsWhereInput = {
+    processedAt: null,
+    category: { not: ">" },
+  };
+  if (filters.productCategory?.trim()) {
+    newProductWhere.category = {
+      equals: filters.productCategory.trim(),
+      mode: Prisma.QueryMode.insensitive,
+    };
+  }
+  if (filters.store?.trim()) {
+    newProductWhere.store = {
+      equals: filters.store.trim(),
+      mode: Prisma.QueryMode.insensitive,
+    };
   }
 
-  // sort best first
-  return matches.sort((a, b) => b.finalScore - a.finalScore);
+  const pendingNewProducts = await prisma.newProducts.findMany({
+    where: newProductWhere,
+    select: {
+      id: true,
+      name: true,
+      category: true,
+      store: true,
+      image: true,
+      price: true,
+    },
+  });
+
+  return buildMatchesForScrapedRows(
+    pendingNewProducts,
+    standards,
+    standardsById,
+    allStandardIds,
+    tokenIndex,
+    limit,
+  );
 }

@@ -1,9 +1,10 @@
-import puppeteer from "puppeteer";
+import { launchBrowser } from "./puppeteerBrowser";
 import { saveProducts, ProductData } from "../productService";
+import { parseIdeaStaraCijenaRsd } from "./ideaStaraCijenaParse";
 
 async function scrapeMaxi(): Promise<ProductData[]> {
   try {
-    const browser = await puppeteer.launch({ headless: true });
+    const browser = await launchBrowser();
     const page = await browser.newPage();
 
     let currentPage = 1;
@@ -43,8 +44,15 @@ async function scrapeMaxi(): Promise<ProductData[]> {
 
       await new Promise((resolve) => setTimeout(resolve, 1500));
 
-      const items: ProductData[] = await page.evaluate(() => {
-        const products: ProductData[] = [];
+      const rawItems = await page.evaluate(() => {
+        const products: {
+          name: string;
+          price: string;
+          oldPriceRaw: string | null;
+          store: string;
+          category: string;
+          image: string;
+        }[] = [];
 
         document
           .querySelectorAll('[data-testid="product-tile-footer"]')
@@ -95,24 +103,9 @@ async function scrapeMaxi(): Promise<ProductData[]> {
               '[data-testid="product-block-old-price"]',
             );
 
-            const oldText =
+            const oldPriceRaw =
               oldPriceContainer?.querySelector("span")?.textContent?.trim() ||
-              "";
-
-            let numericOldPrice: number | null = null;
-
-            if (oldText) {
-              const match = oldText.match(/[\d.,]+/); // extract only number part
-
-              if (match) {
-                const cleaned = match[0]
-                  .replace(/\./g, "") // remove thousand separators
-                  .replace(",", "."); // convert decimal
-
-                const parsed = Number(cleaned);
-                numericOldPrice = isNaN(parsed) ? null : parsed;
-              }
-            }
+              null;
 
             const imageEl = tile?.querySelector(
               'img[data-testid="product-block-image"]',
@@ -134,7 +127,7 @@ async function scrapeMaxi(): Promise<ProductData[]> {
               products.push({
                 name: fullName,
                 price,
-                priceBeforeDiscount: numericOldPrice,
+                oldPriceRaw,
                 store: "Maxi",
                 category: "Sweets and Snacks",
                 image: imageUrl,
@@ -144,6 +137,11 @@ async function scrapeMaxi(): Promise<ProductData[]> {
 
         return products;
       });
+
+      const items: ProductData[] = rawItems.map(({ oldPriceRaw, ...rest }) => ({
+        ...rest,
+        priceBeforeDiscount: parseIdeaStaraCijenaRsd(oldPriceRaw),
+      }));
 
       if (items.length === 0) break;
 
