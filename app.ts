@@ -934,19 +934,32 @@ app.post("/api/scraping/run-now", async (_req: Request, res: Response) => {
       return;
     }
 
-    // Do not await the full ~1h run — client polls /api/scraping/status
-    void runAllCompleteScrapers("manual").then((result) => {
-      if (!result.ok) {
-        console.error("Manual scrape finished with failure:", result.reason);
-      }
-    }).catch((error) => {
-      console.error("Manual scrape run failed:", error);
-    });
-
+    // Reply first, then start work — otherwise Chrome OOM can kill the
+    // process before the browser gets a response ("Failed to fetch").
     res.status(202).json({ success: true, started: true });
+
+    const start = () => {
+      void runAllCompleteScrapers("manual")
+        .then((result) => {
+          if (!result.ok) {
+            console.error("Manual scrape finished with failure:", result.reason);
+          }
+        })
+        .catch((error) => {
+          console.error("Manual scrape run failed:", error);
+        });
+    };
+
+    if (res.writableEnded) {
+      setTimeout(start, 300);
+    } else {
+      res.on("finish", () => setTimeout(start, 300));
+    }
   } catch (error) {
     console.error("Manual scrape run failed:", error);
-    res.status(500).json({ success: false, message: "Manual run failed" });
+    if (!res.headersSent) {
+      res.status(500).json({ success: false, message: "Manual run failed" });
+    }
   }
 });
 

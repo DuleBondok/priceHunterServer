@@ -28,6 +28,12 @@ export function ensurePuppeteerCacheDir(): string {
 export function scraperProcessEnv(): NodeJS.ProcessEnv {
   const env = { ...process.env };
   env.PUPPETEER_CACHE_DIR = PUPPETEER_CACHE_DIR;
+  // Keep child Node heaps smaller so parent API + Chrome fit on Render.
+  if (!env.NODE_OPTIONS?.includes("max-old-space-size")) {
+    env.NODE_OPTIONS = [env.NODE_OPTIONS, "--max-old-space-size=512"]
+      .filter(Boolean)
+      .join(" ");
+  }
   return env;
 }
 
