@@ -27,9 +27,12 @@ RUN apt-get update \
     libxfixes3 \
     libxkbcommon0 \
     libxrandr2 \
+    tzdata \
     wget \
     xdg-utils \
   && rm -rf /var/lib/apt/lists/*
+
+ENV TZ=Europe/Belgrade
 
 WORKDIR /app
 

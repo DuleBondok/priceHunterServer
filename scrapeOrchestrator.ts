@@ -442,17 +442,44 @@ export function initScrapeSchedule(): void {
   if (scheduledInitialized) return;
   scheduledInitialized = true;
 
+  const expression = "0 5 * * *";
+  const timezone = "Europe/Belgrade";
+
+  console.log(
+    `[SCRAPE_SCHEDULER] Registering cron "${expression}" tz=${timezone} (now=${new Date().toISOString()})`,
+  );
+
   // 05:00 every day in Serbian timezone.
-  cron.schedule(
-    "0 5 * * *",
+  const task = cron.schedule(
+    expression,
     async () => {
-      const result = await runAllCompleteScrapers("scheduled");
-      if (!result.ok) {
-        console.error("[SCRAPE_SCHEDULER] Scheduled run skipped/failed:", result.reason);
+      console.log(
+        `[SCRAPE_SCHEDULER] Tick at ${new Date().toISOString()} — starting scheduled run`,
+      );
+      try {
+        const result = await runAllCompleteScrapers("scheduled");
+        if (!result.ok) {
+          console.error(
+            "[SCRAPE_SCHEDULER] Scheduled run skipped/failed:",
+            result.reason,
+          );
+        } else {
+          console.log(
+            "[SCRAPE_SCHEDULER] Scheduled run finished:",
+            result.run?.status,
+            result.run?.id,
+          );
+        }
+      } catch (error) {
+        console.error("[SCRAPE_SCHEDULER] Unhandled scheduled run error:", error);
       }
     },
     {
-      timezone: "Europe/Belgrade",
+      timezone,
     },
+  );
+
+  console.log(
+    `[SCRAPE_SCHEDULER] Registered OK (task=${(task as { name?: string }).name ?? "ok"})`,
   );
 }
