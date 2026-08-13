@@ -73,34 +73,194 @@ model StandardizedProduct {
 }
 
 model Store {
-  id        Int     @id @default(autoincrement())
-  name      String
-  latitude  Float
-  longitude Float
-  address   String
-  city      String
+  id           Int     @id @default(autoincrement())
+  name         String
+  latitude     Float
+  longitude    Float
+  address      String
+  city         String
+  /// Weekly opening hours as JSON. Keys: mon..sun.
+  /// Day open: { "open": "08:00", "close": "21:00" }. Closed: null.
+  /// Example: {"mon":{"open":"08:00","close":"21:00"},"tue":{"open":"08:00","close":"21:00"},"wed":{"open":"08:00","close":"21:00"},"thu":{"open":"08:00","close":"21:00"},"fri":{"open":"08:00","close":"21:00"},"sat":{"open":"08:00","close":"15:00"},"sun":null}
+  openingHours Json?
 }
 
 model ReceiptScan {
-  id                 Int      @id @default(autoincrement())
+  id                 Int       @id @default(autoincrement())
   scannedUrl         String
   scannedUrlHash     String
+  /// Supabase auth.users.id when known (preferred identity).
+  userId             String?
   userEmail          String?
   cartItemsSnapshot  Json?
   cartTotalSnapshot  Decimal?
-  status             String   @default("pending")
+  /// pending | confirmed | rejected
+  status             String    @default("pending")
+  /// Legacy JSON confirmations (kept for admin UI / history compat). Prefer ReceiptConfirmedItem rows.
   itemConfirmations  Json?
   confirmedBy        String?
   confirmedAt        DateTime?
-  createdAt          DateTime @default(now())
+  rejectedBy         String?
+  rejectedAt         DateTime?
+  rejectionReason    String?
+  /// Verified spent/saved at confirm time (RSD). Null until confirmed.
+  confirmedSpentRsd  Decimal?
+  confirmedSavedRsd  Decimal?
+  /// When points were ledgered for this receipt (idempotency audit).
+  pointsGrantedAt    DateTime?
+  createdAt          DateTime  @default(now())
+  /// Isti ID za sve račune iz jedne multi-store kupovine (generiše klijent).
   purchaseGroupId    String?
+  /// Ljudski naziv prodavnice pri skeniranju (npr. iz spiska za kupovinu).
   checkoutStoreLabel String?
+
+  confirmedItems     ReceiptConfirmedItem[]
+  pointsTransactions UserPointsTransaction[]
 
   @@unique([scannedUrlHash])
   @@index([createdAt])
   @@index([userEmail])
+  @@index([userId])
   @@index([status])
   @@index([purchaseGroupId])
+}
+
+/// Admin-confirmed line items for a receipt (source of truth for verified purchases).
+model ReceiptConfirmedItem {
+  id                Int         @id @default(autoincrement())
+  receiptId         Int
+  receipt           ReceiptScan @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  /// Line id from cart snapshot / admin payload.
+  lineId            String
+  productId         String
+  productName       String
+  quantity          Int         @default(1)
+  /// Optional unit price snapshot if known at confirm time.
+  unitPriceRsd      Decimal?
+  /// Catalog max−min × qty estimate at confirm (nullable if catalog unknown).
+  estimatedSavedRsd Decimal?
+  confirmedAt       DateTime    @default(now())
+
+  @@unique([receiptId, lineId])
+  @@index([receiptId])
+  @@index([productId])
+}
+
+/// Running points balance per user (Neon source of truth). Keyed by email and/or auth userId.
+model UserPointsAccount {
+  id                    Int      @id @default(autoincrement())
+  /// Lowercase email (legacy identity used by current app).
+  userEmail             String?  @unique
+  /// Supabase auth UUID when known.
+  userId                String?  @unique
+  /// Current spendable balance (after redemptions).
+  balance               Int      @default(0)
+  /// Lifetime points earned (never decreases on redeem).
+  lifetimeEarned        Int      @default(0)
+  /// Confirmed receipts that already granted points (denormalized).
+  confirmedReceiptCount Int      @default(0)
+  updatedAt             DateTime @updatedAt
+  createdAt             DateTime @default(now())
+
+  transactions   UserPointsTransaction[]
+  userChallenges UserChallenge[]
+  userRewards    UserReward[]
+
+  @@index([userEmail])
+  @@index([userId])
+}
+
+enum PointsTransactionType {
+  FIRST_CONFIRMED_RECEIPT
+  CONFIRMED_RECEIPT
+  CHALLENGE_COMPLETED
+  REWARD_REDEEMED
+  ADJUSTMENT
+}
+
+model UserPointsTransaction {
+  id             Int                   @id @default(autoincrement())
+  accountId      Int
+  account        UserPointsAccount     @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  amount         Int
+  type           PointsTransactionType
+  receiptId      Int?
+  receipt        ReceiptScan?          @relation(fields: [receiptId], references: [id], onDelete: SetNull)
+  challengeId    Int?
+  challenge      Challenge?            @relation(fields: [challengeId], references: [id], onDelete: SetNull)
+  rewardId       Int?
+  reward         Reward?               @relation(fields: [rewardId], references: [id], onDelete: SetNull)
+  /// Stable idempotency key e.g. "confirmed_receipt:123" / "reward_redeem:pavlaka:1"
+  idempotencyKey String
+  description    String?
+  createdAt      DateTime              @default(now())
+
+  @@unique([idempotencyKey])
+  @@index([accountId, createdAt])
+  @@index([receiptId])
+}
+
+model Challenge {
+  id           Int      @id @default(autoincrement())
+  code         String   @unique
+  title        String
+  description  String?
+  /// e.g. confirmed_receipt_count | points_balance | first_confirmed_receipt
+  type         String
+  target       Int      @default(1)
+  pointsReward Int      @default(0)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  userChallenges     UserChallenge[]
+  pointsTransactions UserPointsTransaction[]
+}
+
+model UserChallenge {
+  id              Int               @id @default(autoincrement())
+  accountId       Int
+  account         UserPointsAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  challengeId     Int
+  challenge       Challenge         @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+  progress        Int               @default(0)
+  completedAt     DateTime?
+  rewardGrantedAt DateTime?
+  updatedAt       DateTime          @updatedAt
+  createdAt       DateTime          @default(now())
+
+  @@unique([accountId, challengeId])
+  @@index([accountId])
+}
+
+model Reward {
+  id          Int      @id @default(autoincrement())
+  code        String   @unique
+  title       String
+  description String?
+  /// Points cost to unlock/redeem (0 if granted by challenge).
+  pointsCost  Int      @default(0)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  userRewards        UserReward[]
+  pointsTransactions UserPointsTransaction[]
+}
+
+model UserReward {
+  id          Int               @id @default(autoincrement())
+  accountId   Int
+  account     UserPointsAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  rewardId    Int
+  reward      Reward            @relation(fields: [rewardId], references: [id], onDelete: Cascade)
+  unlockedAt  DateTime          @default(now())
+  redeemedAt  DateTime?
+  voucherCode String?
+  expiresAt   DateTime?
+
+  @@unique([accountId, rewardId])
+  @@index([accountId])
 }
 
 /// Email adrese prikupljene preko waiting liste (npr. newsletter / early access).
@@ -141,4 +301,23 @@ model StoreFieldAudit {
   @@unique([standardizedProductId, store])
   @@index([store])
   @@index([checkedAt])
+}
+
+/// Privremeni staging feed iz Tekijanka partner API-ja (nije povezan sa Product).
+model TekijankaArtikal {
+  id            Int       @id @default(autoincrement())
+  artikalSifra  Int       @unique
+  nazivArtikla  String
+  kategorija    String?
+  podkategorija String?
+  segment       String?
+  jm            String?
+  eanKod        String?
+  redovnaCena   Decimal?  @db.Decimal(10, 2)
+  akcijskaCena  Decimal?  @db.Decimal(10, 2)
+  akcijaDatumOd DateTime?
+  akcijaDatumDo DateTime?
+  dostupnost    String?
+  linkSlike     String?
+  syncedAt      DateTime  @default(now()) @updatedAt
 }

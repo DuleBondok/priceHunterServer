@@ -40,6 +40,11 @@ import {
   requireAdmin,
 } from "./adminAuth";
 import { normalizeReceiptScannedUrl } from "./utils/receiptQrUrl";
+import {
+  confirmReceiptScan,
+  ensureReceiptRewardsCatalog,
+  rejectReceiptScan,
+} from "./receiptRewards";
 import multer from "multer";
 import slugify from "slugify";
 import axios from "axios";
@@ -208,6 +213,10 @@ app.post("/api/receipt-scans", async (req: Request, res: Response) => {
       typeof req.body?.scannedUrl === "string" ? req.body.scannedUrl.trim() : "";
     const userEmailRaw =
       typeof req.body?.userEmail === "string" ? req.body.userEmail.trim() : "";
+    const userIdRaw =
+      typeof req.body?.userId === "string" ? req.body.userId.trim() : "";
+    const userId =
+      userIdRaw.length > 0 && userIdRaw.length <= 80 ? userIdRaw : null;
     const cartItemsSnapshot =
       req.body?.cartItemsSnapshot !== undefined ? req.body.cartItemsSnapshot : null;
     const cartTotalRaw = req.body?.cartTotalSnapshot;
@@ -266,6 +275,7 @@ app.post("/api/receipt-scans", async (req: Request, res: Response) => {
         scannedUrl: normalizedUrl,
         scannedUrlHash,
         userEmail,
+        userId,
         cartItemsSnapshot,
         cartTotalSnapshot,
         status: "pending",
@@ -275,6 +285,7 @@ app.post("/api/receipt-scans", async (req: Request, res: Response) => {
       select: {
         id: true,
         createdAt: true,
+        status: true,
       },
     });
     res.status(201).json(saved);
@@ -423,12 +434,16 @@ app.get("/api/admin/receipt-scans", async (_req: Request, res: Response) => {
         id: true,
         scannedUrl: true,
         userEmail: true,
+        userId: true,
         status: true,
         cartItemsSnapshot: true,
         cartTotalSnapshot: true,
         itemConfirmations: true,
         confirmedBy: true,
         confirmedAt: true,
+        rejectedBy: true,
+        rejectedAt: true,
+        rejectionReason: true,
         createdAt: true,
         purchaseGroupId: true,
         checkoutStoreLabel: true,
@@ -826,23 +841,60 @@ app.patch("/api/admin/receipt-scans/:id/confirm", async (req: Request, res: Resp
       return;
     }
 
-    const updated = await prisma.receiptScan.update({
-      where: { id },
-      data: {
-        status: "confirmed",
-        itemConfirmations,
-        confirmedBy,
-        confirmedAt: new Date(),
-      },
-      select: {
-        id: true,
-        status: true,
-        confirmedAt: true,
-      },
+    const result = await confirmReceiptScan(prisma, {
+      receiptId: id,
+      confirmedBy,
+      itemConfirmations,
     });
-    res.json(updated);
+
+    if (!result.ok) {
+      const status =
+        result.code === "NOT_FOUND"
+          ? 404
+          : result.code === "NO_CONFIRMED_ITEMS"
+            ? 400
+            : 409;
+      res.status(status).json({ message: result.message, code: result.code });
+      return;
+    }
+
+    res.json({
+      id: result.receiptId,
+      status: result.status,
+      pointsAwarded: result.pointsAwarded,
+      balance: result.balance,
+      confirmedAt: new Date().toISOString(),
+    });
   } catch (error) {
     console.error("Error confirming receipt scan:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+app.patch("/api/admin/receipt-scans/:id/reject", async (req: Request, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) {
+      res.status(400).json({ message: "Invalid receipt scan id" });
+      return;
+    }
+    const rejectedByRaw =
+      typeof req.body?.rejectedBy === "string" ? req.body.rejectedBy.trim() : "";
+    const reasonRaw = typeof req.body?.reason === "string" ? req.body.reason.trim() : "";
+    const result = await rejectReceiptScan(prisma, {
+      receiptId: id,
+      rejectedBy: rejectedByRaw || "admin",
+      reason: reasonRaw,
+    });
+    if (!result.ok) {
+      const status =
+        result.code === "NOT_FOUND" ? 404 : result.code === "REASON_REQUIRED" ? 400 : 409;
+      res.status(status).json({ message: result.message, code: result.code });
+      return;
+    }
+    res.json({ id: result.receiptId, status: result.status });
+  } catch (error) {
+    console.error("Error rejecting receipt scan:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 });
@@ -1304,4 +1356,10 @@ app.use('/api/search', searchRoute);
 
 
 const PORT = Number(process.env.PORT) || 5000;
-app.listen(PORT, () => console.log(`Server running on Port ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`Server running on Port ${PORT}`);
+  void ensureReceiptRewardsCatalog(prisma).catch((err: unknown) => {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`[receipt-rewards] catalog seed skipped: ${msg}`);
+  });
+});
