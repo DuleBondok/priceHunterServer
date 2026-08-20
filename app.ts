@@ -699,15 +699,25 @@ app.post(
         return;
       }
 
-      const accountId = process.env.CLOUDFLARE_ACCOUNT_ID?.trim();
-      const imagesToken = process.env.CLOUDFLARE_IMAGES_TOKEN?.trim();
-      const deliveryBase = process.env.CLOUDFLARE_IMAGE_DELIVERY_URL?.trim();
+      // Render (render.yaml) uses CF_*; local scripts often use CLOUDFLARE_*.
+      const accountId =
+        process.env.CLOUDFLARE_ACCOUNT_ID?.trim() ||
+        process.env.CF_ACCOUNT_ID?.trim() ||
+        "";
+      const imagesToken =
+        process.env.CLOUDFLARE_IMAGES_TOKEN?.trim() ||
+        process.env.CF_IMAGES_TOKEN?.trim() ||
+        "";
+      const deliveryHash = process.env.CF_IMAGES_HASH?.trim() || "";
+      const deliveryBase =
+        process.env.CLOUDFLARE_IMAGE_DELIVERY_URL?.trim() ||
+        (deliveryHash ? `https://imagedelivery.net/${deliveryHash}` : "");
 
       if (!accountId || !imagesToken || !deliveryBase) {
         res.status(500).json({
           success: false,
           message:
-            "Missing CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_IMAGES_TOKEN, or CLOUDFLARE_IMAGE_DELIVERY_URL",
+            "Missing Cloudflare Images env (CLOUDFLARE_* or CF_ACCOUNT_ID / CF_IMAGES_TOKEN / CF_IMAGES_HASH)",
         });
         return;
       }
