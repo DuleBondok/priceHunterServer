@@ -31,7 +31,14 @@ git push origin master
 | `DATABASE_URL` | Neon URL (same DB as Pricely) |
 | `DIRECT_DATABASE_URL` | optional direct (non-pooler) Neon URL |
 | `CORS_ORIGINS` | `https://admin.pricely.rs,http://localhost:3000` |
-| Cloudflare image keys | same as local if you use Image Manager |
+| Cloudflare Images (Image Manager) | copy from local `backend/.env` — **required** for upload |
+| `CLOUDFLARE_ACCOUNT_ID` | same as local |
+| `CLOUDFLARE_IMAGES_TOKEN` | same as local |
+| `CLOUDFLARE_IMAGE_DELIVERY_URL` | e.g. `https://imagedelivery.net/<hash>` (same as local) |
+
+Aliases also work: `CF_ACCOUNT_ID`, `CF_IMAGES_TOKEN`, `CF_IMAGES_HASH` (hash only, without the imagedelivery URL prefix).
+
+`.env` is **not** uploaded with Docker — secrets must be set in the Render dashboard.
 
 Do **not** set `ALLOW_CLEAR_DB=true` unless you intentionally need wipe.
 

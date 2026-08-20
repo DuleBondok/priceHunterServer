@@ -714,10 +714,16 @@ app.post(
         (deliveryHash ? `https://imagedelivery.net/${deliveryHash}` : "");
 
       if (!accountId || !imagesToken || !deliveryBase) {
+        const missing = [
+          !accountId ? "CLOUDFLARE_ACCOUNT_ID|CF_ACCOUNT_ID" : null,
+          !imagesToken ? "CLOUDFLARE_IMAGES_TOKEN|CF_IMAGES_TOKEN" : null,
+          !deliveryBase
+            ? "CLOUDFLARE_IMAGE_DELIVERY_URL|CF_IMAGES_HASH"
+            : null,
+        ].filter(Boolean);
         res.status(500).json({
           success: false,
-          message:
-            "Missing Cloudflare Images env (CLOUDFLARE_* or CF_ACCOUNT_ID / CF_IMAGES_TOKEN / CF_IMAGES_HASH)",
+          message: `Missing Cloudflare Images env on this host: ${missing.join(", ")}`,
         });
         return;
       }

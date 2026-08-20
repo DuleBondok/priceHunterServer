@@ -19,6 +19,12 @@ services:
         sync: false
       - key: CORS_ORIGINS
         sync: false
+      - key: CLOUDFLARE_ACCOUNT_ID
+        sync: false
+      - key: CLOUDFLARE_IMAGES_TOKEN
+        sync: false
+      - key: CLOUDFLARE_IMAGE_DELIVERY_URL
+        sync: false
       - key: CF_ACCOUNT_ID
         sync: false
       - key: CF_IMAGES_TOKEN
