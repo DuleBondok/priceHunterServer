@@ -1063,7 +1063,11 @@ function parseOptionalCategoryQuery(
 
 app.get("/matches/meta", async (_req, res) => {
   try {
+    console.log("[matches/meta] start");
     const meta = await getMatchCategoryMeta();
+    console.log(
+      `[matches/meta] ok sp=${meta.standardizedMainCategories.length} cat=${meta.productCategories.length} store=${meta.stores.length}`,
+    );
     res.json(meta);
   } catch (error) {
     console.error("Error getting match category meta:", error);

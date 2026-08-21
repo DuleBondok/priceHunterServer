@@ -301,16 +301,17 @@ function metaFromRows(rows: MetaKindRow[]): Omit<MatchCategoryMeta, "maxStoreLin
 }
 
 export async function getMatchCategoryMeta(): Promise<MatchCategoryMeta> {
+  // SELECT DISTINCT — without it we materialize every Product row in Node (~OOM on Render 512MB).
   const rows = await prisma.$queryRaw<MetaKindRow[]>`
-    SELECT 'sp_main'::text AS kind, "mainCategory"::text AS value
+    SELECT DISTINCT 'sp_main'::text AS kind, "mainCategory"::text AS value
     FROM "StandardizedProduct"
     WHERE "mainCategory" IS NOT NULL AND TRIM("mainCategory") <> ''
     UNION ALL
-    SELECT 'cat'::text, category::text
+    SELECT DISTINCT 'cat'::text, category::text
     FROM "Product"
     WHERE category IS NOT NULL AND TRIM(category) <> '' AND category <> '>'
     UNION ALL
-    SELECT 'store'::text, store::text
+    SELECT DISTINCT 'store'::text, store::text
     FROM "Product"
     WHERE store IS NOT NULL AND TRIM(store) <> ''
   `;
@@ -323,15 +324,15 @@ export async function getMatchCategoryMeta(): Promise<MatchCategoryMeta> {
 
 export async function getNewProductMatchCategoryMeta(): Promise<MatchCategoryMeta> {
   const rows = await prisma.$queryRaw<MetaKindRow[]>`
-    SELECT 'sp_main'::text AS kind, "mainCategory"::text AS value
+    SELECT DISTINCT 'sp_main'::text AS kind, "mainCategory"::text AS value
     FROM "StandardizedProduct"
     WHERE "mainCategory" IS NOT NULL AND TRIM("mainCategory") <> ''
     UNION ALL
-    SELECT 'cat'::text, category::text
+    SELECT DISTINCT 'cat'::text, category::text
     FROM "NewProducts"
     WHERE "processedAt" IS NULL AND category IS NOT NULL AND TRIM(category) <> '' AND category <> '>'
     UNION ALL
-    SELECT 'store'::text, store::text
+    SELECT DISTINCT 'store'::text, store::text
     FROM "NewProducts"
     WHERE "processedAt" IS NULL AND store IS NOT NULL AND TRIM(store) <> ''
   `;
