@@ -28,10 +28,6 @@ function chunk<T>(items: T[], size: number): T[][] {
   return out;
 }
 
-const EMPTY_IMAGE_FILTER: Prisma.StringFilter = {
-  in: ["", "null", "undefined", "n/a", "-", "none"],
-};
-
 export function blockedProductKey(normalizedName: string, store: string): string {
   return `${normalizedName}-${store}`;
 }
@@ -211,54 +207,39 @@ export async function unblockListing(id: number): Promise<void> {
   await blockedOf().delete({ where: { id } });
 }
 
-export type EmptyImageCandidate = {
-  source: "product" | "newProduct";
-  id: number;
-  name: string;
-  normalizedName: string | null;
-  store: string;
-  category: string;
-  image: string;
-  price: string | null;
-};
-
-export async function listEmptyImageCandidates(input: {
-  store?: string;
-  category?: string;
+export async function searchProductsByName(input: {
+  q: string;
   take?: number;
 }): Promise<{
-  productTotal: number;
-  newProductTotal: number;
-  products: EmptyImageCandidate[];
-  newProducts: EmptyImageCandidate[];
+  total: number;
+  products: Array<{
+    id: number;
+    name: string;
+    normalizedName: string | null;
+    store: string;
+    category: string;
+    image: string;
+    price: string | null;
+  }>;
 }> {
-  const take = Math.min(Math.max(input.take ?? 80, 1), 200);
-  const store = input.store?.trim() || undefined;
-  const category = input.category?.trim() || undefined;
-  const where = {
-    ...(store ? { store } : {}),
-    ...(category ? { category } : {}),
-    image: EMPTY_IMAGE_FILTER,
-  };
+  const q = input.q.trim();
+  if (q.length < 2) {
+    throw new Error("Search query must be at least 2 characters");
+  }
 
-  const [productTotal, newProductTotal, products, pending] = await Promise.all([
+  const take = Math.min(Math.max(input.take ?? 50, 1), 100);
+  const where: Prisma.ProductWhereInput = /^\d+$/.test(q)
+    ? { id: Number(q) }
+    : {
+        OR: [
+          { name: { contains: q, mode: "insensitive" } },
+          { normalizedName: { contains: q, mode: "insensitive" } },
+        ],
+      };
+
+  const [total, products] = await Promise.all([
     prisma.product.count({ where }),
-    prisma.newProducts.count({ where }),
     prisma.product.findMany({
-      where,
-      orderBy: { id: "desc" },
-      take,
-      select: {
-        id: true,
-        name: true,
-        normalizedName: true,
-        store: true,
-        category: true,
-        image: true,
-        price: true,
-      },
-    }),
-    prisma.newProducts.findMany({
       where,
       orderBy: { id: "desc" },
       take,
@@ -274,12 +255,7 @@ export async function listEmptyImageCandidates(input: {
     }),
   ]);
 
-  return {
-    productTotal,
-    newProductTotal,
-    products: products.map((row) => ({ ...row, source: "product" as const })),
-    newProducts: pending.map((row) => ({ ...row, source: "newProduct" as const })),
-  };
+  return { total, products };
 }
 
 export async function listBlockedProducts(input: {

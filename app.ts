@@ -29,7 +29,7 @@ import {
 import {
   blockListings,
   listBlockedProducts,
-  listEmptyImageCandidates,
+  searchProductsByName,
   unblockListing,
 } from "./blockedProduct";
 import {
@@ -1254,18 +1254,19 @@ app.post("/api/admin/brand-promote/confirm", async (req, res) => {
   }
 });
 
-app.get("/api/admin/blocked-products/candidates", async (req, res) => {
+app.get("/api/admin/blocked-products/search", async (req, res) => {
   try {
     const takeRaw = Number(req.query.take);
-    const result = await listEmptyImageCandidates({
-      store: parseOptionalCategoryQuery(req.query.store),
-      category: parseOptionalCategoryQuery(req.query.category),
+    const result = await searchProductsByName({
+      q: parseOptionalCategoryQuery(req.query.q) ?? "",
       take: Number.isFinite(takeRaw) ? takeRaw : undefined,
     });
     res.json(result);
   } catch (error) {
-    console.error("blocked-products/candidates:", error);
-    res.status(500).json({ error: "Internal Server Error" });
+    const message = error instanceof Error ? error.message : "Internal error";
+    console.error("blocked-products/search:", error);
+    const status = message.includes("at least") ? 400 : 500;
+    res.status(status).json({ error: message });
   }
 });
 
