@@ -331,3 +331,17 @@ model CatalogBrand {
   matchName String   @unique
   createdAt DateTime @default(now())
 }
+
+/// Permanently excluded listings. Scrape will not recreate Product/NewProducts for this key.
+model BlockedProduct {
+  id             Int      @id @default(autoincrement())
+  normalizedName String
+  store          String
+  name           String
+  category       String?
+  reason         String?
+  createdAt      DateTime @default(now())
+
+  @@unique([normalizedName, store], name: "blocked_normalizedName_store")
+  @@index([store])
+}

@@ -27,6 +27,12 @@ import {
   previewBrandPromote,
 } from "./brandPromote";
 import {
+  blockListings,
+  listBlockedProducts,
+  listEmptyImageCandidates,
+  unblockListing,
+} from "./blockedProduct";
+import {
   deleteProductById,
   getDuplicateStoreLinks,
   unlinkProductFromStandardized,
@@ -1068,6 +1074,17 @@ function parseOptionalCategoryQuery(
   return t === "" ? undefined : t;
 }
 
+function parseIdList(value: unknown): number[] {
+  if (!Array.isArray(value)) return [];
+  return [
+    ...new Set(
+      value
+        .map((item) => Number(item))
+        .filter((id) => Number.isFinite(id) && id > 0),
+    ),
+  ];
+}
+
 app.get("/matches/meta", async (_req, res) => {
   try {
     console.log("[matches/meta] start");
@@ -1233,6 +1250,81 @@ app.post("/api/admin/brand-promote/confirm", async (req, res) => {
             message.includes("not available")
           ? 400
           : 500;
+    res.status(status).json({ error: message });
+  }
+});
+
+app.get("/api/admin/blocked-products/candidates", async (req, res) => {
+  try {
+    const takeRaw = Number(req.query.take);
+    const result = await listEmptyImageCandidates({
+      store: parseOptionalCategoryQuery(req.query.store),
+      category: parseOptionalCategoryQuery(req.query.category),
+      take: Number.isFinite(takeRaw) ? takeRaw : undefined,
+    });
+    res.json(result);
+  } catch (error) {
+    console.error("blocked-products/candidates:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+app.get("/api/admin/blocked-products", async (req, res) => {
+  try {
+    const takeRaw = Number(req.query.take);
+    const skipRaw = Number(req.query.skip);
+    const result = await listBlockedProducts({
+      store: parseOptionalCategoryQuery(req.query.store),
+      q: parseOptionalCategoryQuery(req.query.q),
+      take: Number.isFinite(takeRaw) ? takeRaw : undefined,
+      skip: Number.isFinite(skipRaw) ? skipRaw : undefined,
+    });
+    res.json(result);
+  } catch (error) {
+    console.error("blocked-products list:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+app.post("/api/admin/blocked-products", async (req, res) => {
+  try {
+    const productIds = parseIdList(req.body?.productIds);
+    const newProductIds = parseIdList(req.body?.newProductIds);
+    if (!productIds.length && !newProductIds.length) {
+      res.status(400).json({ error: "Provide productIds and/or newProductIds" });
+      return;
+    }
+    const result = await blockListings({
+      productIds,
+      newProductIds,
+      reason:
+        typeof req.body?.reason === "string" ? req.body.reason : undefined,
+    });
+    res.json({
+      message: "Listings blocked and removed from Product and NewProducts.",
+      ...result,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Internal error";
+    console.error("blocked-products block:", error);
+    const status = message.includes("Too many") ? 400 : 500;
+    res.status(status).json({ error: message });
+  }
+});
+
+app.delete("/api/admin/blocked-products/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) {
+      res.status(400).json({ error: "Invalid blocked product id" });
+      return;
+    }
+    await unblockListing(id);
+    res.json({ ok: true });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Internal error";
+    console.error("blocked-products unblock:", error);
+    const status = message.includes("Record to delete does not exist") ? 404 : 500;
     res.status(status).json({ error: message });
   }
 });

@@ -10,7 +10,7 @@ promotePendingNewProductsForStore(store)
   .then((result) => {
     const totalInDb = result.promoted + result.skippedExisting;
     console.log(
-      `[${store}] Pending: ${result.pending}, promoted to Product: ${result.promoted}, skipped (already in Product): ${result.skippedExisting}`,
+      `[${store}] Pending: ${result.pending}, promoted to Product: ${result.promoted}, skipped (already in Product): ${result.skippedExisting}, skipped blocked: ${result.skippedBlocked}`,
     );
     process.exit(0);
   })

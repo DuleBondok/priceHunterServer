@@ -5,6 +5,12 @@ import {
   isDisplayableProductPrice,
   pricedProductWhere,
 } from "./utils/pricedProductFilter";
+import {
+  blockedProductKey,
+  isProductBlocked,
+  loadBlockedKeysForStores,
+  purgeBlockedListingsForStores,
+} from "./blockedProduct";
 
 export type ProductData = {
   name: string;
@@ -56,7 +62,7 @@ export type SaveProductsResult = {
   totalInDb: number;
 };
 
-function normalizeName(name: string): string {
+export function normalizeName(name: string): string {
   return name
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -186,6 +192,12 @@ export async function confirmNewProductMatch(
     throw new Error(`StandardizedProduct #${standardizedProductId} not found`);
   }
 
+  if (await isProductBlocked(pending.normalizedName, pending.store)) {
+    throw new Error(
+      `This listing is blocked (${pending.store} / ${pending.normalizedName}) and cannot be promoted`,
+    );
+  }
+
   if (standardized.products.some((p) => p.store === pending.store)) {
     throw new Error(
       `StandardizedProduct #${standardizedProductId} already has a listing for store "${pending.store}"`,
@@ -243,6 +255,7 @@ export type PromotePendingNewProductsResult = {
   pending: number;
   promoted: number;
   skippedExisting: number;
+  skippedBlocked: number;
 };
 
 /**
@@ -258,7 +271,7 @@ export async function promotePendingNewProductsForStore(
   });
 
   if (pending.length === 0) {
-    return { pending: 0, promoted: 0, skippedExisting: 0 };
+    return { pending: 0, promoted: 0, skippedExisting: 0, skippedBlocked: 0 };
   }
 
   const existing = await prisma.product.findMany({
@@ -270,9 +283,22 @@ export async function promotePendingNewProductsForStore(
       .map((row) => row.normalizedName)
       .filter((name): name is string => Boolean(name)),
   );
+  const blockedKeys = await loadBlockedKeysForStores([store]);
 
-  const toCreate = pending.filter((row) => !existingNames.has(row.normalizedName));
-  const skippedExisting = pending.length - toCreate.length;
+  const toCreate: typeof pending = [];
+  let skippedExisting = 0;
+  let skippedBlocked = 0;
+  for (const row of pending) {
+    if (blockedKeys.has(blockedProductKey(row.normalizedName, row.store))) {
+      skippedBlocked++;
+      continue;
+    }
+    if (existingNames.has(row.normalizedName)) {
+      skippedExisting++;
+      continue;
+    }
+    toCreate.push(row);
+  }
   const promotedAt = new Date();
 
   await runInBatches(toCreate, 100, async (batch) => {
@@ -301,6 +327,7 @@ export async function promotePendingNewProductsForStore(
     pending: pending.length,
     promoted: toCreate.length,
     skippedExisting,
+    skippedBlocked,
   };
 }
 
@@ -337,6 +364,10 @@ export async function saveProducts(
   console.log(`🛠️ Processing ${products.length} products...`);
 
   const storesInBatch = [...new Set(products.map((p) => p.store))];
+  const blockedKeys = await loadBlockedKeysForStores(storesInBatch);
+  if (blockedKeys.size > 0) {
+    await purgeBlockedListingsForStores(storesInBatch);
+  }
 
   const [existingProducts, existingNewProducts] = await Promise.all([
     prisma.product.findMany({
@@ -392,6 +423,7 @@ export async function saveProducts(
   let updateCount = 0;
   let newProductsUpdatedCount = 0;
   let flaggedSkippedCount = 0;
+  let blockedSkippedCount = 0;
   const firstPriceCandidateSpIds = new Set<number>();
 
   const newProductCreateOps: Prisma.NewProductsCreateManyInput[] = [];
@@ -424,6 +456,10 @@ export async function saveProducts(
   for (const p of products) {
     const normalizedName = normalizeName(p.name);
     const key = productKey(normalizedName, p.store);
+    if (blockedKeys.has(key)) {
+      blockedSkippedCount++;
+      continue;
+    }
     if (!seenByStore.has(p.store)) {
       seenByStore.set(p.store, new Set<string>());
     }
@@ -650,7 +686,7 @@ export async function saveProducts(
   const totalInDb = await prisma.product.count();
 
   console.log(
-    `⚡ Product updated: ${updateCount}, NewProducts created: ${newProductsCreatedCount}, NewProducts updated: ${newProductsUpdatedCount}, Flagged skipped: ${flaggedSkippedCount}, Missing marked: ${missingIncrementIds.length}, Hidden (${AVAILABILITY_GRACE_DAYS}d+): ${availabilityHidden}, Products in DB: ${totalInDb}`,
+    `⚡ Product updated: ${updateCount}, NewProducts created: ${newProductsCreatedCount}, NewProducts updated: ${newProductsUpdatedCount}, Flagged skipped: ${flaggedSkippedCount}, Blocked skipped: ${blockedSkippedCount}, Missing marked: ${missingIncrementIds.length}, Hidden (${AVAILABILITY_GRACE_DAYS}d+): ${availabilityHidden}, Products in DB: ${totalInDb}`,
   );
 
   return {

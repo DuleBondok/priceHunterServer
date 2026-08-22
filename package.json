@@ -8,6 +8,7 @@
     "build": "prisma generate && npm run puppeteer:install",
     "scrape:idea-complete": "ts-node runIdeaCompleteScrape.ts",
     "backfill:dis-old-prices": "ts-node backfillDisPriceBeforeDiscount.ts",
+    "block:products": "ts-node scripts/block-products.ts",
     "puppeteer:install": "node scripts/installPuppeteerChrome.js"
   },
   "keywords": [],
