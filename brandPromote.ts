@@ -52,24 +52,34 @@ export function mappedMainCategory(productCategory: string): string {
   return mapped?.[0] ?? "";
 }
 
+export type CatalogBrandRow = {
+  id: number;
+  name: string;
+  matchName: string;
+  createdAt: Date;
+};
+
 export function matchBrandPrefix(
   productName: string,
-  brands: string[],
-): { brand: string; remainder: string } | null {
+  brands: Array<{ name: string; matchName: string }>,
+): { brand: string; remainder: string; matchName: string } | null {
   const name = productName.trim();
   if (!name) return null;
 
   const sorted = [...brands]
-    .map((b) => b.trim())
-    .filter(Boolean)
-    .sort((a, b) => b.length - a.length);
+    .map((b) => ({
+      name: b.name.trim(),
+      matchName: b.matchName.trim(),
+    }))
+    .filter((b) => b.matchName && b.name)
+    .sort((a, b) => b.matchName.length - a.matchName.length);
 
   for (const brand of sorted) {
-    const pattern = new RegExp(`^${escapeRegex(brand)}(?:\\s+|$)`, "i");
+    const pattern = new RegExp(`^${escapeRegex(brand.matchName)}(?:\\s+|$)`, "i");
     if (!pattern.test(name)) continue;
     const remainder = name.replace(pattern, " ").replace(/\s+/g, " ").trim();
     if (!remainder) continue;
-    return { brand, remainder };
+    return { brand: brand.name, remainder, matchName: brand.matchName };
   }
 
   return null;
@@ -77,7 +87,7 @@ export function matchBrandPrefix(
 
 export function buildDraft(
   product: { name: string; category: string; image: string },
-  brands: string[],
+  brands: Array<{ name: string; matchName: string }>,
 ): BrandPromoteDraft | null {
   const matched = matchBrandPrefix(product.name, brands);
   if (!matched) return null;
@@ -93,29 +103,30 @@ export function buildDraft(
   };
 }
 
-export async function listCatalogBrands() {
+export async function listCatalogBrands(): Promise<CatalogBrandRow[]> {
   return prisma.catalogBrand.findMany({
-    orderBy: { name: "asc" },
-    select: { id: true, name: true, createdAt: true },
+    orderBy: [{ name: "asc" }, { matchName: "asc" }],
+    select: { id: true, name: true, matchName: true, createdAt: true },
   });
 }
 
-export async function addCatalogBrand(rawName: string) {
-  const name = rawName.trim().replace(/\s+/g, " ");
-  if (!name) {
-    throw new Error("Brand name is required");
+export async function addCatalogBrand(rawMatchName: string, rawName?: string) {
+  const matchName = rawMatchName.trim().replace(/\s+/g, " ");
+  const name = (rawName ?? "").trim().replace(/\s+/g, " ") || matchName;
+  if (!matchName) {
+    throw new Error("Product prefix is required");
   }
   try {
     return await prisma.catalogBrand.create({
-      data: { name },
-      select: { id: true, name: true, createdAt: true },
+      data: { name, matchName },
+      select: { id: true, name: true, matchName: true, createdAt: true },
     });
   } catch (error) {
     if (
       error instanceof Prisma.PrismaClientKnownRequestError &&
       error.code === "P2002"
     ) {
-      throw new Error("Brand already exists");
+      throw new Error("That Product prefix already exists");
     }
     throw error;
   }
@@ -157,7 +168,6 @@ export async function previewBrandPromote(category: string) {
   }
 
   const brands = await listCatalogBrands();
-  const brandNames = brands.map((b) => b.name);
 
   const totalUnmatchedAvailable = await prisma.product.count({
     where: {
@@ -193,7 +203,7 @@ export async function previewBrandPromote(category: string) {
   let withBrand = 0;
 
   for (const product of products) {
-    const draft = buildDraft(product, brandNames);
+    const draft = buildDraft(product, brands);
     if (draft) {
       withBrand += 1;
       if (suggestions.length < BRAND_PROMOTE_LIMIT) {

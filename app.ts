@@ -1166,7 +1166,9 @@ app.get("/api/admin/brand-promote/meta", async (_req, res) => {
 app.post("/api/admin/brand-promote/brands", async (req, res) => {
   try {
     const name = typeof req.body?.name === "string" ? req.body.name : "";
-    const brand = await addCatalogBrand(name);
+    const matchName =
+      typeof req.body?.matchName === "string" ? req.body.matchName : name;
+    const brand = await addCatalogBrand(matchName, name);
     res.json(brand);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Internal error";

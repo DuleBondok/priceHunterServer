@@ -325,6 +325,9 @@ model TekijankaArtikal {
 /// Admin-managed brand list for creating StandardizedProduct from unmatched Product rows.
 model CatalogBrand {
   id        Int      @id @default(autoincrement())
-  name      String   @unique
+  /// Canonical brand written to StandardizedProduct.brand (e.g. "Milk House").
+  name      String
+  /// Prefix matched at the start of Product.name (e.g. "MH").
+  matchName String   @unique
   createdAt DateTime @default(now())
 }
