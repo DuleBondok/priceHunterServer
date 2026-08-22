@@ -1,13 +1,27 @@
 import { Prisma } from "@prisma/client";
 import prisma from "./prismaClient";
 
+type BlockedRow = {
+  id: number;
+  normalizedName: string;
+  store: string;
+  name: string;
+  category: string | null;
+  reason: string | null;
+  createdAt: Date;
+};
+
+type BlockedKeyRow = {
+  normalizedName: string;
+  store: string;
+};
+
 type BlockedDelegate = {
-  findMany: (args: unknown) => Promise<any>;
-  findUnique: (args: unknown) => Promise<any>;
-  createMany: (args: unknown) => Promise<any>;
+  findMany: (args: unknown) => Promise<BlockedRow[]>;
+  findUnique: (args: unknown) => Promise<{ id: number } | null>;
+  createMany: (args: unknown) => Promise<{ count: number }>;
   count: (args: unknown) => Promise<number>;
-  delete: (args: unknown) => Promise<any>;
-  deleteMany?: (args: unknown) => Promise<any>;
+  delete: (args: unknown) => Promise<BlockedRow>;
 };
 
 function blockedOf(client: object = prisma): BlockedDelegate {
@@ -36,12 +50,14 @@ export async function loadBlockedKeysForStores(
   stores: string[],
 ): Promise<Set<string>> {
   if (!stores.length) return new Set();
-  const rows = await blockedOf().findMany({
+  const rows: BlockedKeyRow[] = await blockedOf().findMany({
     where: { store: { in: stores } },
     select: { normalizedName: true, store: true },
   });
   return new Set(
-    rows.map((row) => blockedProductKey(row.normalizedName, row.store)),
+    rows.map((row: BlockedKeyRow) =>
+      blockedProductKey(row.normalizedName, row.store),
+    ),
   );
 }
 
@@ -65,7 +81,7 @@ export async function purgeBlockedListingsForStores(
     return { deletedProducts: 0, deletedNewProducts: 0 };
   }
 
-  const blocked = await blockedOf().findMany({
+  const blocked: BlockedKeyRow[] = await blockedOf().findMany({
     where: { store: { in: stores } },
     select: { normalizedName: true, store: true },
   });
@@ -77,7 +93,7 @@ export async function purgeBlockedListingsForStores(
   let deletedNewProducts = 0;
   for (const batch of chunk(blocked, 100)) {
     const where = {
-      OR: batch.map((row) => ({
+      OR: batch.map((row: BlockedKeyRow) => ({
         normalizedName: row.normalizedName,
         store: row.store,
       })),
@@ -309,7 +325,7 @@ export async function listBlockedProducts(input: {
         reason: true,
         createdAt: true,
       },
-    }),
+    }) as Promise<BlockedRow[]>,
   ]);
 
   return { total, items };
