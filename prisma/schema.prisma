@@ -321,3 +321,10 @@ model TekijankaArtikal {
   linkSlike     String?
   syncedAt      DateTime  @default(now()) @updatedAt
 }
+
+/// Admin-managed brand list for creating StandardizedProduct from unmatched Product rows.
+model CatalogBrand {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique
+  createdAt DateTime @default(now())
+}

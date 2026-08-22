@@ -20,6 +20,13 @@ import {
 } from "./testMatching";
 import { confirmNewProductMatch } from "./productService";
 import {
+  addCatalogBrand,
+  confirmBrandPromote,
+  deleteCatalogBrand,
+  getBrandPromoteMeta,
+  previewBrandPromote,
+} from "./brandPromote";
+import {
   deleteProductById,
   getDuplicateStoreLinks,
   unlinkProductFromStandardized,
@@ -1143,6 +1150,88 @@ app.get("/new-product-matches", async (req, res) => {
   } catch (error) {
     console.error("Error getting new product matches:", error);
     res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+app.get("/api/admin/brand-promote/meta", async (_req, res) => {
+  try {
+    const meta = await getBrandPromoteMeta();
+    res.json(meta);
+  } catch (error) {
+    console.error("brand-promote/meta:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+app.post("/api/admin/brand-promote/brands", async (req, res) => {
+  try {
+    const name = typeof req.body?.name === "string" ? req.body.name : "";
+    const brand = await addCatalogBrand(name);
+    res.json(brand);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Internal error";
+    const status = message.includes("required") || message.includes("exists") ? 400 : 500;
+    res.status(status).json({ error: message });
+  }
+});
+
+app.delete("/api/admin/brand-promote/brands/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) {
+      res.status(400).json({ error: "Invalid brand id" });
+      return;
+    }
+    await deleteCatalogBrand(id);
+    res.json({ ok: true });
+  } catch (error) {
+    console.error("brand-promote delete brand:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+app.get("/api/admin/brand-promote/preview", async (req, res) => {
+  try {
+    const category =
+      typeof req.query.category === "string" ? req.query.category : "";
+    const preview = await previewBrandPromote(category);
+    res.json(preview);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Internal error";
+    const status = message.includes("required") ? 400 : 500;
+    if (status === 500) console.error("brand-promote/preview:", error);
+    res.status(status).json({ error: message });
+  }
+});
+
+app.post("/api/admin/brand-promote/confirm", async (req, res) => {
+  try {
+    const result = await confirmBrandPromote({
+      productId: Number(req.body?.productId),
+      brand: String(req.body?.brand ?? ""),
+      name: String(req.body?.name ?? ""),
+      volume: String(req.body?.volume ?? ""),
+      mainCategory: String(req.body?.mainCategory ?? ""),
+      midCategory: String(req.body?.midCategory ?? ""),
+      subCategory: String(req.body?.subCategory ?? ""),
+      image: String(req.body?.image ?? ""),
+    });
+    res.json({
+      message: "StandardizedProduct created and linked.",
+      ...result,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Internal error";
+    console.error("brand-promote/confirm:", error);
+    const status =
+      message.includes("not found")
+        ? 404
+        : message.includes("required") ||
+            message.includes("already") ||
+            message.includes("not available")
+          ? 400
+          : 500;
+    res.status(status).json({ error: message });
   }
 });
 
