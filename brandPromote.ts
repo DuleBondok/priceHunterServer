@@ -63,21 +63,27 @@ export function matchBrandPrefix(
   productName: string,
   brands: Array<{ name: string; matchName: string }>,
 ): { brand: string; remainder: string; matchName: string } | null {
-  const name = productName.trim();
+  const name = productName.trim().replace(/\s+/g, " ");
   if (!name) return null;
 
   const sorted = [...brands]
     .map((b) => ({
       name: b.name.trim(),
-      matchName: b.matchName.trim(),
+      matchName: b.matchName.trim().replace(/\s+/g, " "),
     }))
     .filter((b) => b.matchName && b.name)
     .sort((a, b) => b.matchName.length - a.matchName.length);
 
   for (const brand of sorted) {
-    const pattern = new RegExp(`^${escapeRegex(brand.matchName)}(?:\\s+|$)`, "i");
+    const token = escapeRegex(brand.matchName);
+    // Whole phrase anywhere (start, middle, or end). DIS often puts brand last:
+    // "SIR GAUDA BAŠ BAŠ 250G" — not only "Dobro Trapist 250g".
+    const pattern = new RegExp(`(?:^|\\s)${token}(?=\\s|$)`, "i");
     if (!pattern.test(name)) continue;
-    const remainder = name.replace(pattern, " ").replace(/\s+/g, " ").trim();
+    const remainder = name
+      .replace(pattern, " ")
+      .replace(/\s+/g, " ")
+      .trim();
     if (!remainder) continue;
     return { brand: brand.name, remainder, matchName: brand.matchName };
   }
