@@ -143,13 +143,12 @@ async function fillStoreOccupancyForPage(
   const stores = [
     ...new Set(unmatchedProducts.map((p) => p.store).filter(Boolean)),
   ];
-  const standardIds = [...standardsById.keys()];
-  if (!stores.length || !standardIds.length) return;
+  if (!stores.length || standardsById.size === 0) return;
 
   const rows = await prisma.product.findMany({
     where: {
       store: { in: stores },
-      standardizedProductId: { in: standardIds },
+      standardizedProductId: { not: null },
     },
     select: { standardizedProductId: true, store: true },
   });
@@ -416,9 +415,6 @@ export async function getProductMatches(
     ),
   );
 
-  const { standardsById, tokenIndex } =
-    await loadStandardsForMatching(filters.standardizedMainCategory);
-
   const productWhere: Prisma.ProductWhereInput = {
     standardizedProductId: null,
     category: { not: ">" },
@@ -450,6 +446,22 @@ export async function getProductMatches(
       price: true,
     },
   });
+
+  if (!unmatchedProducts.length) {
+    return {
+      matches: [],
+      eligible,
+      withSuggestion: 0,
+      weakSuggestion: 0,
+      withoutSuggestion: 0,
+      total: eligible,
+      limit,
+      truncated: false,
+    };
+  }
+
+  const { standardsById, tokenIndex } =
+    await loadStandardsForMatching(filters.standardizedMainCategory);
 
   await fillStoreOccupancyForPage(standardsById, unmatchedProducts);
   const remainingIds = [...standardsById.keys()];
