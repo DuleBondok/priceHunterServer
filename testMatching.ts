@@ -300,7 +300,17 @@ function metaFromRows(rows: MetaKindRow[]): Omit<MatchCategoryMeta, "maxStoreLin
   };
 }
 
+let matchCategoryMetaCache: { at: number; value: MatchCategoryMeta } | null = null;
+const MATCH_CATEGORY_META_TTL_MS = 5 * 60_000;
+
 export async function getMatchCategoryMeta(): Promise<MatchCategoryMeta> {
+  if (
+    matchCategoryMetaCache &&
+    Date.now() - matchCategoryMetaCache.at < MATCH_CATEGORY_META_TTL_MS
+  ) {
+    return matchCategoryMetaCache.value;
+  }
+
   // SELECT DISTINCT — without it we materialize every Product row in Node (~OOM on Render 512MB).
   const rows = await prisma.$queryRaw<MetaKindRow[]>`
     SELECT DISTINCT 'sp_main'::text AS kind, "mainCategory"::text AS value
@@ -316,10 +326,12 @@ export async function getMatchCategoryMeta(): Promise<MatchCategoryMeta> {
     WHERE store IS NOT NULL AND TRIM(store) <> ''
   `;
 
-  return {
+  const value = {
     ...metaFromRows(rows),
     maxStoreLinksPerStandard: MAX_STORE_LINKS_PER_STANDARD,
   };
+  matchCategoryMetaCache = { at: Date.now(), value };
+  return value;
 }
 
 export async function getNewProductMatchCategoryMeta(): Promise<MatchCategoryMeta> {
