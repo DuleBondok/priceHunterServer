@@ -7,14 +7,17 @@ import {
   linkedStoreCount,
   MAX_STORE_LINKS_PER_STANDARD,
   MIN_WEAK_MATCH_SCORE,
+  rankStandardIdsByNameSimilarity,
   scoreProductMatch,
 } from "./matchingUtils";
 
 /** Hard cap for scripts. Admin HTTP uses MATCHES_ADMIN_DEFAULT_LIMIT. */
 export const MATCHES_PAGE_LIMIT = 15000;
-/** Default page size for /matches — scoring every unmatched milk row OOMs Render. */
+/** Rows returned to admin after ranking the larger scored pool. */
 export const MATCHES_ADMIN_DEFAULT_LIMIT = 80;
-const MAX_MATCH_CANDIDATES = 60;
+/** Score this many unmatched rows, then keep the highest-scoring page. */
+const MATCHES_ADMIN_SCORE_POOL = 250;
+const MAX_MATCH_CANDIDATES = 120;
 
 export type ProductMatchesFilters = {
   standardizedMainCategory?: string;
@@ -176,6 +179,49 @@ async function fillStoreOccupancyForPage(
   }
 }
 
+function combinedStandardName(sp: StandardForMatch): string {
+  return `${sp.brand ?? ""} ${sp.name} ${sp.volume ?? ""}`;
+}
+
+function pickCandidateIds(
+  scrapedName: string,
+  tokenIndex: ReturnType<typeof buildStandardizedTokenIndex>,
+  allStandardIds: number[],
+  standardsById: Map<number, StandardForMatch>,
+): number[] {
+  let ids = candidateStandardizedIds(scrapedName, tokenIndex, allStandardIds);
+  const combinedNameById = (id: number) => {
+    const sp = standardsById.get(id);
+    return sp ? combinedStandardName(sp) : "";
+  };
+
+  if (ids.length > MAX_MATCH_CANDIDATES) {
+    return rankStandardIdsByNameSimilarity(
+      scrapedName,
+      ids,
+      combinedNameById,
+    ).slice(0, MAX_MATCH_CANDIDATES);
+  }
+
+  if (ids.length < 12 && allStandardIds.length) {
+    const extra = rankStandardIdsByNameSimilarity(
+      scrapedName,
+      allStandardIds,
+      combinedNameById,
+    ).slice(0, 40);
+    ids = [...new Set([...ids, ...extra])];
+  }
+
+  if (ids.length > MAX_MATCH_CANDIDATES) {
+    ids = rankStandardIdsByNameSimilarity(
+      scrapedName,
+      ids,
+      combinedNameById,
+    ).slice(0, MAX_MATCH_CANDIDATES);
+  }
+  return ids;
+}
+
 function buildMatchesForScrapedRows(
   unmatchedProducts: ScrapedMatchRow[],
   standards: StandardForMatch[],
@@ -185,19 +231,14 @@ function buildMatchesForScrapedRows(
   limit: number,
 ): ProductMatchesResult {
   const matches: ProductMatchRow[] = [];
-  let withSuggestion = 0;
-  let weakSuggestionCount = 0;
-  let withoutSuggestion = 0;
 
   for (const scraped of unmatchedProducts) {
-    let candidateIds = candidateStandardizedIds(
+    const candidateIds = pickCandidateIds(
       scraped.name,
       tokenIndex,
       allStandardIds,
+      standardsById,
     );
-    if (candidateIds.length > MAX_MATCH_CANDIDATES) {
-      candidateIds = candidateIds.slice(0, MAX_MATCH_CANDIDATES);
-    }
 
     let bestSp: StandardForMatch | null = null;
     let bestScored: NonNullable<ReturnType<typeof scoreProductMatch>> | null =
@@ -273,7 +314,6 @@ function buildMatchesForScrapedRows(
         finalScore: bestScored.finalScore,
         lowConfidence: bestScored.finalScore < 0.62,
       });
-      withSuggestion++;
     } else if (weakSp && weakScored) {
       matches.push({
         product: scraped,
@@ -294,7 +334,6 @@ function buildMatchesForScrapedRows(
         lowConfidence: true,
         weakSuggestion: true,
       });
-      weakSuggestionCount++;
     } else {
       matches.push({
         product: scraped,
@@ -308,7 +347,6 @@ function buildMatchesForScrapedRows(
         lowConfidence: true,
         noSuggestion: true,
       });
-      withoutSuggestion++;
     }
   }
 
@@ -318,19 +356,21 @@ function buildMatchesForScrapedRows(
     return b.finalScore - a.finalScore;
   });
 
-  const eligible = unmatchedProducts.length;
-  const total = matches.length;
-  const truncated = total > limit;
+  const strong = matches.filter((m) => !m.noSuggestion && !m.weakSuggestion);
+  const weak = matches.filter((m) => m.weakSuggestion);
+  const none = matches.filter((m) => m.noSuggestion);
+  const ranked = [...strong, ...weak, ...none];
+  const page = ranked.slice(0, limit);
 
   return {
-    matches: truncated ? matches.slice(0, limit) : matches,
-    eligible,
-    withSuggestion,
-    weakSuggestion: weakSuggestionCount,
-    withoutSuggestion,
-    total,
+    matches: page,
+    eligible: unmatchedProducts.length,
+    withSuggestion: page.filter((m) => !m.noSuggestion && !m.weakSuggestion).length,
+    weakSuggestion: page.filter((m) => m.weakSuggestion).length,
+    withoutSuggestion: page.filter((m) => m.noSuggestion).length,
+    total: ranked.length,
     limit,
-    truncated,
+    truncated: ranked.length > page.length,
   };
 }
 
@@ -440,10 +480,15 @@ export async function getProductMatches(
   }
 
   const eligible = await prisma.product.count({ where: productWhere });
+  const poolSize = Math.min(
+    Math.max(limit * 3, MATCHES_ADMIN_SCORE_POOL),
+    400,
+    MATCHES_PAGE_LIMIT,
+  );
   const unmatchedProducts = await prisma.product.findMany({
     where: productWhere,
     orderBy: { id: "asc" },
-    take: limit,
+    take: poolSize,
     select: {
       id: true,
       name: true,
@@ -544,10 +589,15 @@ export async function getNewProductMatches(
   }
 
   const eligible = await prisma.newProducts.count({ where: newProductWhere });
+  const poolSize = Math.min(
+    Math.max(limit * 3, MATCHES_ADMIN_SCORE_POOL),
+    400,
+    MATCHES_PAGE_LIMIT,
+  );
   const pendingNewProducts = await prisma.newProducts.findMany({
     where: newProductWhere,
     orderBy: { id: "asc" },
-    take: limit,
+    take: poolSize,
     select: {
       id: true,
       name: true,

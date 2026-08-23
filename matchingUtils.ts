@@ -237,12 +237,30 @@ export function scoreProductMatch(input: MatchScoreInput): MatchScoreResult | nu
   return computeMatchScore(input);
 }
 
+/** Stable tokens for inverted index: words plus normalized volume (vol180 for 180g). */
+export function volumeIndexTokens(text: string): string[] {
+  return extractVolumesNormalized(text).map(
+    (liters) => `vol${Math.round(liters * 1000)}`,
+  );
+}
+
+export function lookupTokens(text: string): string[] {
+  return [...new Set([...significantTokens(text), ...volumeIndexTokens(text)])];
+}
+
 export function buildStandardizedTokenIndex(
-  standards: Array<{ id: number; brand: string | null; name: string }>,
+  standards: Array<{
+    id: number;
+    brand: string | null;
+    name: string;
+    volume?: string | null;
+  }>,
 ): Map<string, number[]> {
   const index = new Map<string, number[]>();
   for (const sp of standards) {
-    const tokens = significantTokens(`${sp.brand ?? ""} ${sp.name}`);
+    const tokens = lookupTokens(
+      `${sp.brand ?? ""} ${sp.name} ${sp.volume ?? ""}`,
+    );
     const seen = new Set<string>();
     for (const token of tokens) {
       if (seen.has(token)) continue;
@@ -258,9 +276,9 @@ export function buildStandardizedTokenIndex(
 export function candidateStandardizedIds(
   scrapedName: string,
   tokenIndex: Map<string, number[]>,
-  allIds: number[],
+  _allIds: number[],
 ): number[] {
-  const tokens = significantTokens(scrapedName);
+  const tokens = lookupTokens(scrapedName);
   if (!tokens.length) return [];
 
   const counts = new Map<number, number>();
@@ -277,4 +295,22 @@ export function candidateStandardizedIds(
   return [...counts.entries()]
     .sort((a, b) => b[1] - a[1])
     .map(([id]) => id);
+}
+
+export function rankStandardIdsByNameSimilarity(
+  scrapedName: string,
+  ids: number[],
+  combinedNameById: (id: number) => string,
+): number[] {
+  const scrapedNorm = normalizeText(scrapedName);
+  return ids
+    .map((id) => ({
+      id,
+      fuzzy: compareTwoStrings(
+        scrapedNorm,
+        normalizeText(combinedNameById(id)),
+      ),
+    }))
+    .sort((a, b) => b.fuzzy - a.fuzzy)
+    .map((row) => row.id);
 }
