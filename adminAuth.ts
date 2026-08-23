@@ -50,6 +50,11 @@ export function requireAdmin(
     return;
   }
 
+  if (req.method === "OPTIONS") {
+    next();
+    return;
+  }
+
   const presented = extractPresentedToken(req);
   if (presented && presented === expected) {
     next();

@@ -199,6 +199,8 @@ const app = express();
 app.use(
   cors({
     origin: parseCorsOrigins(),
+    allowedHeaders: ["Authorization", "Content-Type", "Accept"],
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
   }),
 );
 app.use(express.json());
@@ -1115,11 +1117,15 @@ app.get("/matches", async (req, res) => {
       return;
     }
 
+    const started = Date.now();
     const result = await getProductMatches({
       standardizedMainCategory,
       productCategory,
       store,
     });
+    console.log(
+      `[matches] done in ${Date.now() - started}ms rows=${result.matches.length} eligible=${result.eligible}`,
+    );
     res.json(result);
   } catch (error) {
     console.error("Error getting matches:", error);
