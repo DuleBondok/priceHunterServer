@@ -10,8 +10,11 @@ import {
   scoreProductMatch,
 } from "./matchingUtils";
 
-/** Max rows returned per request (one row per eligible unmatched product when under cap). */
+/** Hard cap for scripts. Admin HTTP uses MATCHES_ADMIN_DEFAULT_LIMIT. */
 export const MATCHES_PAGE_LIMIT = 15000;
+/** Default page size for /matches — scoring every unmatched milk row OOMs Render. */
+export const MATCHES_ADMIN_DEFAULT_LIMIT = 80;
+const MAX_MATCH_CANDIDATES = 60;
 
 export type ProductMatchesFilters = {
   standardizedMainCategory?: string;
@@ -81,7 +84,7 @@ type StandardForMatch = {
   volume: string | null;
   image: string | null;
   mainCategory: string | null;
-  products: { id: number; store: string }[];
+  products: { store: string }[];
 };
 
 function distinctSorted(values: string[]): string[] {
@@ -115,13 +118,34 @@ async function loadStandardsForMatching(
       volume: true,
       image: true,
       mainCategory: true,
-      products: { select: { id: true, store: true } },
     },
   });
 
-  const standards = allStandards.filter(
-    (sp) => linkedStoreCount(sp.products) < MAX_STORE_LINKS_PER_STANDARD,
-  );
+  const storeRows =
+    allStandards.length === 0
+      ? []
+      : await prisma.product.findMany({
+          where: {
+            standardizedProductId: { in: allStandards.map((sp) => sp.id) },
+          },
+          select: { standardizedProductId: true, store: true },
+          distinct: ["standardizedProductId", "store"],
+        });
+
+  const storesByStandardId = new Map<number, { store: string }[]>();
+  for (const row of storeRows) {
+    if (row.standardizedProductId == null) continue;
+    const list = storesByStandardId.get(row.standardizedProductId) ?? [];
+    list.push({ store: row.store });
+    storesByStandardId.set(row.standardizedProductId, list);
+  }
+
+  const standards = allStandards
+    .map((sp) => ({
+      ...sp,
+      products: storesByStandardId.get(sp.id) ?? [],
+    }))
+    .filter((sp) => linkedStoreCount(sp.products) < MAX_STORE_LINKS_PER_STANDARD);
 
   return {
     standards,
@@ -145,11 +169,14 @@ function buildMatchesForScrapedRows(
   let withoutSuggestion = 0;
 
   for (const scraped of unmatchedProducts) {
-    const candidateIds = candidateStandardizedIds(
+    let candidateIds = candidateStandardizedIds(
       scraped.name,
       tokenIndex,
       allStandardIds,
     );
+    if (candidateIds.length > MAX_MATCH_CANDIDATES) {
+      candidateIds = candidateIds.slice(0, MAX_MATCH_CANDIDATES);
+    }
 
     let bestSp: StandardForMatch | null = null;
     let bestScored: NonNullable<ReturnType<typeof scoreProductMatch>> | null =
@@ -179,22 +206,30 @@ function buildMatchesForScrapedRows(
         bestSp = sp;
         bestScored = scored;
       }
+    }
 
-      const weak = computeMatchScore(
-        {
-          scrapedName: scraped.name,
-          scrapedCategory: scraped.category,
-          standardizedBrand: sp.brand,
-          standardizedName: sp.name,
-          standardizedVolume: sp.volume,
-          standardizedMainCategory: sp.mainCategory,
-        },
-        { relaxed: true, minScore: MIN_WEAK_MATCH_SCORE },
-      );
+    if (!bestSp) {
+      for (const spId of candidateIds) {
+        const sp = standardsById.get(spId);
+        if (!sp) continue;
+        if (sp.products.some((p) => p.store === scraped.store)) continue;
 
-      if (weak && (!weakScored || weak.finalScore > weakScored.finalScore)) {
-        weakSp = sp;
-        weakScored = weak;
+        const weak = computeMatchScore(
+          {
+            scrapedName: scraped.name,
+            scrapedCategory: scraped.category,
+            standardizedBrand: sp.brand,
+            standardizedName: sp.name,
+            standardizedVolume: sp.volume,
+            standardizedMainCategory: sp.mainCategory,
+          },
+          { relaxed: true, minScore: MIN_WEAK_MATCH_SCORE },
+        );
+
+        if (weak && (!weakScored || weak.finalScore > weakScored.finalScore)) {
+          weakSp = sp;
+          weakScored = weak;
+        }
       }
     }
 
@@ -360,7 +395,10 @@ export async function getProductMatches(
 ): Promise<ProductMatchesResult> {
   const limit = Math.max(
     1,
-    Math.min(filters.limit ?? MATCHES_PAGE_LIMIT, MATCHES_PAGE_LIMIT),
+    Math.min(
+      filters.limit ?? MATCHES_ADMIN_DEFAULT_LIMIT,
+      MATCHES_PAGE_LIMIT,
+    ),
   );
 
   const { standards, standardsById, allStandardIds, tokenIndex } =
@@ -383,8 +421,11 @@ export async function getProductMatches(
     };
   }
 
+  const eligible = await prisma.product.count({ where: productWhere });
   const unmatchedProducts = await prisma.product.findMany({
     where: productWhere,
+    orderBy: { id: "asc" },
+    take: limit,
     select: {
       id: true,
       name: true,
@@ -395,7 +436,7 @@ export async function getProductMatches(
     },
   });
 
-  return buildMatchesForScrapedRows(
+  const result = buildMatchesForScrapedRows(
     unmatchedProducts,
     standards,
     standardsById,
@@ -403,6 +444,10 @@ export async function getProductMatches(
     tokenIndex,
     limit,
   );
+  result.eligible = eligible;
+  result.total = eligible;
+  result.truncated = eligible > result.matches.length;
+  return result;
 }
 
 export async function getNewProductMatches(
@@ -410,7 +455,10 @@ export async function getNewProductMatches(
 ): Promise<ProductMatchesResult> {
   const limit = Math.max(
     1,
-    Math.min(filters.limit ?? MATCHES_PAGE_LIMIT, MATCHES_PAGE_LIMIT),
+    Math.min(
+      filters.limit ?? MATCHES_ADMIN_DEFAULT_LIMIT,
+      MATCHES_PAGE_LIMIT,
+    ),
   );
 
   const { standards, standardsById, allStandardIds, tokenIndex } =
@@ -433,8 +481,11 @@ export async function getNewProductMatches(
     };
   }
 
+  const eligible = await prisma.newProducts.count({ where: newProductWhere });
   const pendingNewProducts = await prisma.newProducts.findMany({
     where: newProductWhere,
+    orderBy: { id: "asc" },
+    take: limit,
     select: {
       id: true,
       name: true,
@@ -445,7 +496,7 @@ export async function getNewProductMatches(
     },
   });
 
-  return buildMatchesForScrapedRows(
+  const result = buildMatchesForScrapedRows(
     pendingNewProducts,
     standards,
     standardsById,
@@ -453,4 +504,8 @@ export async function getNewProductMatches(
     tokenIndex,
     limit,
   );
+  result.eligible = eligible;
+  result.total = eligible;
+  result.truncated = eligible > result.matches.length;
+  return result;
 }
