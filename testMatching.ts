@@ -116,7 +116,6 @@ async function loadStandardsForMatching(
       name: true,
       brand: true,
       volume: true,
-      image: true,
       mainCategory: true,
     },
   });
@@ -125,6 +124,7 @@ async function loadStandardsForMatching(
   // Loading every Product linked to the whole category OOMs Render (512MB).
   const standards: StandardForMatch[] = allStandards.map((sp) => ({
     ...sp,
+    image: null,
     products: [],
   }));
 
@@ -481,7 +481,30 @@ export async function getProductMatches(
   result.eligible = eligible;
   result.total = eligible;
   result.truncated = eligible > result.matches.length;
+  await attachStandardImages(result.matches);
   return result;
+}
+
+async function attachStandardImages(matches: ProductMatchRow[]): Promise<void> {
+  const ids = [
+    ...new Set(
+      matches
+        .map((m) => m.standardizedProduct?.id)
+        .filter((id): id is number => typeof id === "number"),
+    ),
+  ];
+  if (!ids.length) return;
+  const rows = await prisma.standardizedProduct.findMany({
+    where: { id: { in: ids } },
+    select: { id: true, image: true },
+  });
+  const imageById = new Map(rows.map((row) => [row.id, row.image ?? ""]));
+  for (const match of matches) {
+    if (match.standardizedProduct) {
+      match.standardizedProduct.image =
+        imageById.get(match.standardizedProduct.id) ?? "";
+    }
+  }
 }
 
 export async function getNewProductMatches(
@@ -544,5 +567,6 @@ export async function getNewProductMatches(
   result.eligible = eligible;
   result.total = eligible;
   result.truncated = eligible > result.matches.length;
+  await attachStandardImages(result.matches);
   return result;
 }
