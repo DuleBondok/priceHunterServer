@@ -261,7 +261,7 @@ export function candidateStandardizedIds(
   allIds: number[],
 ): number[] {
   const tokens = significantTokens(scrapedName);
-  if (!tokens.length) return allIds;
+  if (!tokens.length) return [];
 
   const counts = new Map<number, number>();
   for (const token of tokens) {
@@ -272,7 +272,7 @@ export function candidateStandardizedIds(
     }
   }
 
-  if (!counts.size) return allIds;
+  if (!counts.size) return [];
 
   return [...counts.entries()]
     .sort((a, b) => b[1] - a[1])

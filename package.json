@@ -4,7 +4,7 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "ts-node app.ts",
+    "start": "ts-node --transpile-only app.ts",
     "build": "prisma generate && npm run puppeteer:install",
     "scrape:idea-complete": "ts-node runIdeaCompleteScrape.ts",
     "backfill:dis-old-prices": "ts-node backfillDisPriceBeforeDiscount.ts",

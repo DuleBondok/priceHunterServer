@@ -107,6 +107,13 @@ async function loadStandardsForMatching(
       equals: standardizedMainCategory.trim(),
       mode: Prisma.QueryMode.insensitive,
     };
+  } else {
+    return {
+      standards: [],
+      standardsById: new Map(),
+      allStandardIds: [],
+      tokenIndex: buildStandardizedTokenIndex([]),
+    };
   }
 
   const allStandards = await prisma.standardizedProduct.findMany({
@@ -462,12 +469,10 @@ export async function getProductMatches(
 
   const { standardsById, tokenIndex } =
     await loadStandardsForMatching(filters.standardizedMainCategory);
-
-  await fillStoreOccupancyForPage(standardsById, unmatchedProducts);
   const remainingIds = [...standardsById.keys()];
 
   console.log(
-    `[matches] sp=${filters.standardizedMainCategory ?? ""} cat=${filters.productCategory ?? ""} store=${filters.store ?? ""} unmatched=${unmatchedProducts.length}/${eligible} standards=${remainingIds.length}`,
+    `[matches] sp=${filters.standardizedMainCategory ?? ""} cat=${filters.productCategory ?? ""} store=${filters.store ?? ""} unmatched=${unmatchedProducts.length}/${eligible} standards=${remainingIds.length} rss=${Math.round(process.memoryUsage().rss / 1024 / 1024)}MB`,
   );
 
   const result = buildMatchesForScrapedRows(
@@ -553,7 +558,6 @@ export async function getNewProductMatches(
     },
   });
 
-  await fillStoreOccupancyForPage(standardsById, pendingNewProducts);
   const remainingIds = [...standardsById.keys()];
 
   const result = buildMatchesForScrapedRows(
