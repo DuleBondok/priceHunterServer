@@ -1069,6 +1069,7 @@ app.delete('/api/clear-db', async (req, res) => {
 function parseOptionalCategoryQuery(
   value: unknown,
 ): string | undefined {
+  if (Array.isArray(value)) value = value[0];
   if (typeof value !== "string") return undefined;
   const t = value.trim();
   return t === "" ? undefined : t;
@@ -1108,6 +1109,11 @@ app.get("/matches", async (req, res) => {
       req.query.productCategory,
     );
     const store = parseOptionalCategoryQuery(req.query.store);
+
+    if (!standardizedMainCategory && !productCategory && !store) {
+      res.status(400).json({ error: "Select a category or store first" });
+      return;
+    }
 
     const result = await getProductMatches({
       standardizedMainCategory,

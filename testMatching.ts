@@ -121,31 +121,12 @@ async function loadStandardsForMatching(
     },
   });
 
-  const storeRows =
-    allStandards.length === 0
-      ? []
-      : await prisma.product.findMany({
-          where: {
-            standardizedProductId: { in: allStandards.map((sp) => sp.id) },
-          },
-          select: { standardizedProductId: true, store: true },
-          distinct: ["standardizedProductId", "store"],
-        });
-
-  const storesByStandardId = new Map<number, { store: string }[]>();
-  for (const row of storeRows) {
-    if (row.standardizedProductId == null) continue;
-    const list = storesByStandardId.get(row.standardizedProductId) ?? [];
-    list.push({ store: row.store });
-    storesByStandardId.set(row.standardizedProductId, list);
-  }
-
-  const standards = allStandards
-    .map((sp) => ({
-      ...sp,
-      products: storesByStandardId.get(sp.id) ?? [],
-    }))
-    .filter((sp) => linkedStoreCount(sp.products) < MAX_STORE_LINKS_PER_STANDARD);
+  // Occupancy is filled later for the unmatched page's stores only.
+  // Loading every Product linked to the whole category OOMs Render (512MB).
+  const standards: StandardForMatch[] = allStandards.map((sp) => ({
+    ...sp,
+    products: [],
+  }));
 
   return {
     standards,
@@ -153,6 +134,40 @@ async function loadStandardsForMatching(
     allStandardIds: standards.map((sp) => sp.id),
     tokenIndex: buildStandardizedTokenIndex(standards),
   };
+}
+
+async function fillStoreOccupancyForPage(
+  standardsById: Map<number, StandardForMatch>,
+  unmatchedProducts: ScrapedMatchRow[],
+): Promise<void> {
+  const stores = [
+    ...new Set(unmatchedProducts.map((p) => p.store).filter(Boolean)),
+  ];
+  const standardIds = [...standardsById.keys()];
+  if (!stores.length || !standardIds.length) return;
+
+  const rows = await prisma.product.findMany({
+    where: {
+      store: { in: stores },
+      standardizedProductId: { in: standardIds },
+    },
+    select: { standardizedProductId: true, store: true },
+  });
+
+  for (const row of rows) {
+    if (row.standardizedProductId == null) continue;
+    const sp = standardsById.get(row.standardizedProductId);
+    if (!sp) continue;
+    if (!sp.products.some((p) => p.store === row.store)) {
+      sp.products.push({ store: row.store });
+    }
+  }
+
+  for (const [id, sp] of [...standardsById.entries()]) {
+    if (linkedStoreCount(sp.products) >= MAX_STORE_LINKS_PER_STANDARD) {
+      standardsById.delete(id);
+    }
+  }
 }
 
 function buildMatchesForScrapedRows(
@@ -401,7 +416,7 @@ export async function getProductMatches(
     ),
   );
 
-  const { standards, standardsById, allStandardIds, tokenIndex } =
+  const { standardsById, tokenIndex } =
     await loadStandardsForMatching(filters.standardizedMainCategory);
 
   const productWhere: Prisma.ProductWhereInput = {
@@ -436,11 +451,18 @@ export async function getProductMatches(
     },
   });
 
+  await fillStoreOccupancyForPage(standardsById, unmatchedProducts);
+  const remainingIds = [...standardsById.keys()];
+
+  console.log(
+    `[matches] sp=${filters.standardizedMainCategory ?? ""} cat=${filters.productCategory ?? ""} store=${filters.store ?? ""} unmatched=${unmatchedProducts.length}/${eligible} standards=${remainingIds.length}`,
+  );
+
   const result = buildMatchesForScrapedRows(
     unmatchedProducts,
-    standards,
+    [...standardsById.values()],
     standardsById,
-    allStandardIds,
+    remainingIds,
     tokenIndex,
     limit,
   );
@@ -461,7 +483,7 @@ export async function getNewProductMatches(
     ),
   );
 
-  const { standards, standardsById, allStandardIds, tokenIndex } =
+  const { standardsById, tokenIndex } =
     await loadStandardsForMatching(filters.standardizedMainCategory);
 
   const newProductWhere: Prisma.NewProductsWhereInput = {
@@ -496,11 +518,14 @@ export async function getNewProductMatches(
     },
   });
 
+  await fillStoreOccupancyForPage(standardsById, pendingNewProducts);
+  const remainingIds = [...standardsById.keys()];
+
   const result = buildMatchesForScrapedRows(
     pendingNewProducts,
-    standards,
+    [...standardsById.values()],
     standardsById,
-    allStandardIds,
+    remainingIds,
     tokenIndex,
     limit,
   );
