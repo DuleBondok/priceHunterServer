@@ -451,6 +451,58 @@ export async function getNewProductMatchCategoryMeta(): Promise<MatchCategoryMet
   };
 }
 
+async function matchScrapedRows(
+  unmatchedProducts: ScrapedMatchRow[],
+  filters: ProductMatchesFilters,
+  limit: number,
+  eligible: number,
+  logLabel: string,
+): Promise<ProductMatchesResult> {
+  if (!unmatchedProducts.length) {
+    return {
+      matches: [],
+      eligible,
+      withSuggestion: 0,
+      weakSuggestion: 0,
+      withoutSuggestion: 0,
+      total: eligible,
+      limit,
+      truncated: false,
+    };
+  }
+
+  const { standardsById, tokenIndex } = await loadStandardsForMatching(
+    filters.standardizedMainCategory,
+  );
+  const remainingIds = [...standardsById.keys()];
+
+  console.log(
+    `[${logLabel}] sp=${filters.standardizedMainCategory ?? ""} cat=${filters.productCategory ?? ""} store=${filters.store ?? ""} unmatched=${unmatchedProducts.length}/${eligible} standards=${remainingIds.length} rss=${Math.round(process.memoryUsage().rss / 1024 / 1024)}MB`,
+  );
+
+  const result = buildMatchesForScrapedRows(
+    unmatchedProducts,
+    [...standardsById.values()],
+    standardsById,
+    remainingIds,
+    tokenIndex,
+    limit,
+  );
+  result.eligible = eligible;
+  result.total = eligible;
+  result.truncated = eligible > result.matches.length;
+  await attachStandardImages(result.matches);
+  return result;
+}
+
+function poolSizeForLimit(limit: number): number {
+  return Math.min(
+    Math.max(limit * 3, MATCHES_ADMIN_SCORE_POOL),
+    400,
+    MATCHES_PAGE_LIMIT,
+  );
+}
+
 export async function getProductMatches(
   filters: ProductMatchesFilters = {},
 ): Promise<ProductMatchesResult> {
@@ -480,15 +532,10 @@ export async function getProductMatches(
   }
 
   const eligible = await prisma.product.count({ where: productWhere });
-  const poolSize = Math.min(
-    Math.max(limit * 3, MATCHES_ADMIN_SCORE_POOL),
-    400,
-    MATCHES_PAGE_LIMIT,
-  );
   const unmatchedProducts = await prisma.product.findMany({
     where: productWhere,
     orderBy: { id: "asc" },
-    take: poolSize,
+    take: poolSizeForLimit(limit),
     select: {
       id: true,
       name: true,
@@ -499,40 +546,13 @@ export async function getProductMatches(
     },
   });
 
-  if (!unmatchedProducts.length) {
-    return {
-      matches: [],
-      eligible,
-      withSuggestion: 0,
-      weakSuggestion: 0,
-      withoutSuggestion: 0,
-      total: eligible,
-      limit,
-      truncated: false,
-    };
-  }
-
-  const { standardsById, tokenIndex } =
-    await loadStandardsForMatching(filters.standardizedMainCategory);
-  const remainingIds = [...standardsById.keys()];
-
-  console.log(
-    `[matches] sp=${filters.standardizedMainCategory ?? ""} cat=${filters.productCategory ?? ""} store=${filters.store ?? ""} unmatched=${unmatchedProducts.length}/${eligible} standards=${remainingIds.length} rss=${Math.round(process.memoryUsage().rss / 1024 / 1024)}MB`,
-  );
-
-  const result = buildMatchesForScrapedRows(
+  return matchScrapedRows(
     unmatchedProducts,
-    [...standardsById.values()],
-    standardsById,
-    remainingIds,
-    tokenIndex,
+    filters,
     limit,
+    eligible,
+    "matches",
   );
-  result.eligible = eligible;
-  result.total = eligible;
-  result.truncated = eligible > result.matches.length;
-  await attachStandardImages(result.matches);
-  return result;
 }
 
 async function attachStandardImages(matches: ProductMatchRow[]): Promise<void> {
@@ -568,9 +588,6 @@ export async function getNewProductMatches(
     ),
   );
 
-  const { standardsById, tokenIndex } =
-    await loadStandardsForMatching(filters.standardizedMainCategory);
-
   const newProductWhere: Prisma.NewProductsWhereInput = {
     processedAt: null,
     category: { not: ">" },
@@ -589,15 +606,10 @@ export async function getNewProductMatches(
   }
 
   const eligible = await prisma.newProducts.count({ where: newProductWhere });
-  const poolSize = Math.min(
-    Math.max(limit * 3, MATCHES_ADMIN_SCORE_POOL),
-    400,
-    MATCHES_PAGE_LIMIT,
-  );
   const pendingNewProducts = await prisma.newProducts.findMany({
     where: newProductWhere,
     orderBy: { id: "asc" },
-    take: poolSize,
+    take: poolSizeForLimit(limit),
     select: {
       id: true,
       name: true,
@@ -608,19 +620,11 @@ export async function getNewProductMatches(
     },
   });
 
-  const remainingIds = [...standardsById.keys()];
-
-  const result = buildMatchesForScrapedRows(
+  return matchScrapedRows(
     pendingNewProducts,
-    [...standardsById.values()],
-    standardsById,
-    remainingIds,
-    tokenIndex,
+    filters,
     limit,
+    eligible,
+    "new-product-matches",
   );
-  result.eligible = eligible;
-  result.total = eligible;
-  result.truncated = eligible > result.matches.length;
-  await attachStandardImages(result.matches);
-  return result;
 }

@@ -1170,11 +1170,20 @@ app.get("/new-product-matches", async (req, res) => {
     );
     const store = parseOptionalCategoryQuery(req.query.store);
 
+    if (!standardizedMainCategory && !productCategory && !store) {
+      res.status(400).json({ error: "Select a category or store first" });
+      return;
+    }
+
+    const started = Date.now();
     const result = await getNewProductMatches({
       standardizedMainCategory,
       productCategory,
       store,
     });
+    console.log(
+      `[new-product-matches] done in ${Date.now() - started}ms rows=${result.matches.length} eligible=${result.eligible}`,
+    );
     res.json(result);
   } catch (error) {
     console.error("Error getting new product matches:", error);
