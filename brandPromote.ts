@@ -173,7 +173,40 @@ export async function previewBrandPromote(category: string) {
     throw new Error("category is required");
   }
 
-  const brands = await listCatalogBrands();
+  const catalogBrands = await listCatalogBrands();
+  const mainCategory = mappedMainCategory(trimmed);
+
+  const existingBrandRows = mainCategory
+    ? await prisma.standardizedProduct.findMany({
+        where: {
+          mainCategory,
+          brand: { not: null },
+        },
+        distinct: ["brand"],
+        select: { brand: true },
+        orderBy: { brand: "asc" },
+        take: 400,
+      })
+    : [];
+  const existingBrands = existingBrandRows
+    .map((row) => row.brand?.trim())
+    .filter((name): name is string => Boolean(name));
+
+  const seenMatch = new Set(
+    catalogBrands.map((b) => b.matchName.trim().toLowerCase()),
+  );
+  const brandsForMatch = [
+    ...catalogBrands.map((b) => ({
+      name: b.name,
+      matchName: b.matchName,
+    })),
+  ];
+  for (const brand of existingBrands) {
+    const key = brand.toLowerCase();
+    if (seenMatch.has(key)) continue;
+    seenMatch.add(key);
+    brandsForMatch.push({ name: brand, matchName: brand });
+  }
 
   const totalUnmatchedAvailable = await prisma.product.count({
     where: {
@@ -198,45 +231,56 @@ export async function previewBrandPromote(category: string) {
       price: true,
     },
     orderBy: { name: "asc" },
-    take: 400,
+    take: 2000,
   });
 
-  const suggestions: {
+  const hits: {
     product: (typeof products)[number];
     draft: BrandPromoteDraft;
   }[] = [];
   const unmatchedNames: string[] = [];
-  let withBrand = 0;
 
   for (const product of products) {
-    const draft = buildDraft(product, brands);
+    const draft = buildDraft(product, brandsForMatch);
     if (draft) {
-      withBrand += 1;
-      if (suggestions.length < BRAND_PROMOTE_LIMIT) {
-        suggestions.push({ product, draft });
-      }
+      hits.push({ product, draft });
     } else if (unmatchedNames.length < 40) {
       unmatchedNames.push(product.name);
     }
   }
 
-  const mainCategory = mappedMainCategory(trimmed);
-  const existingBrands = mainCategory
-    ? (
-        await prisma.standardizedProduct.findMany({
-          where: {
-            mainCategory,
-            brand: { not: null },
-          },
-          distinct: ["brand"],
-          select: { brand: true },
-          orderBy: { brand: "asc" },
-          take: 80,
-        })
-      )
-        .map((row) => row.brand?.trim())
-        .filter((name): name is string => Boolean(name))
-    : [];
+  const byBrand = new Map<string, typeof hits>();
+  for (const hit of hits) {
+    const key = hit.draft.brand.trim() || "?";
+    const list = byBrand.get(key) ?? [];
+    list.push(hit);
+    byBrand.set(key, list);
+  }
+  const catalogLower = new Set(
+    catalogBrands.map((b) => b.name.trim().toLowerCase()),
+  );
+  const brandKeys = [...byBrand.keys()].sort((a, b) => {
+    const ca = catalogLower.has(a.toLowerCase()) ? 0 : 1;
+    const cb = catalogLower.has(b.toLowerCase()) ? 0 : 1;
+    if (ca !== cb) return ca - cb;
+    const na = byBrand.get(a)?.length ?? 0;
+    const nb = byBrand.get(b)?.length ?? 0;
+    if (nb !== na) return nb - na;
+    return a.localeCompare(b, "sr");
+  });
+
+  const limited: typeof hits = [];
+  for (let i = 0; limited.length < BRAND_PROMOTE_LIMIT; i++) {
+    let added = false;
+    for (const key of brandKeys) {
+      const row = (byBrand.get(key) ?? [])[i];
+      if (!row) continue;
+      limited.push(row);
+      added = true;
+      if (limited.length >= BRAND_PROMOTE_LIMIT) break;
+    }
+    if (!added) break;
+  }
 
   return {
     category: trimmed,
@@ -244,14 +288,14 @@ export async function previewBrandPromote(category: string) {
     totalUnmatchedAvailable,
     scanned: products.length,
     truncatedScan: totalUnmatchedAvailable > products.length,
-    withBrand,
-    withoutBrand: Math.max(0, totalUnmatchedAvailable - withBrand),
+    withBrand: hits.length,
+    withoutBrand: Math.max(0, totalUnmatchedAvailable - hits.length),
     limit: BRAND_PROMOTE_LIMIT,
-    truncated: withBrand > suggestions.length,
-    brands,
+    truncated: hits.length > limited.length,
+    brands: catalogBrands,
     existingBrands,
     unmatchedNames,
-    suggestions,
+    suggestions: limited,
   };
 }
 
