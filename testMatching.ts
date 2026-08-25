@@ -2,22 +2,24 @@ import { Prisma } from "@prisma/client";
 import prisma from "./prismaClient";
 import {
   buildStandardizedTokenIndex,
-  candidateStandardizedIds,
   computeMatchScore,
+  extractVolumesNormalized,
+  getBestVolumeScore,
   linkedStoreCount,
   MAX_STORE_LINKS_PER_STANDARD,
   MIN_WEAK_MATCH_SCORE,
-  rankStandardIdsByNameSimilarity,
+  normalizeText,
   scoreProductMatch,
 } from "./matchingUtils";
+import { compareTwoStrings } from "string-similarity";
 
 /** Hard cap for scripts. Admin HTTP uses MATCHES_ADMIN_DEFAULT_LIMIT. */
 export const MATCHES_PAGE_LIMIT = 15000;
 /** Rows returned to admin after ranking the larger scored pool. */
 export const MATCHES_ADMIN_DEFAULT_LIMIT = 80;
-/** Score this many unmatched rows, then keep the highest-scoring page. */
-const MATCHES_ADMIN_SCORE_POOL = 250;
-const MAX_MATCH_CANDIDATES = 120;
+/** Score this many unmatched rows (not first-by-id page), then keep the highest-scoring 80. */
+const MATCHES_ADMIN_SCORE_POOL = 800;
+const MAX_MATCH_CANDIDATES = 80;
 
 export type ProductMatchesFilters = {
   standardizedMainCategory?: string;
@@ -183,43 +185,48 @@ function combinedStandardName(sp: StandardForMatch): string {
   return `${sp.brand ?? ""} ${sp.name} ${sp.volume ?? ""}`;
 }
 
+function buildSpNormById(
+  standardsById: Map<number, StandardForMatch>,
+): Map<number, string> {
+  const map = new Map<number, string>();
+  for (const [id, sp] of standardsById) {
+    map.set(id, normalizeText(combinedStandardName(sp)));
+  }
+  return map;
+}
+
+function buildSpVolsById(
+  standardsById: Map<number, StandardForMatch>,
+): Map<number, number[]> {
+  const map = new Map<number, number[]>();
+  for (const [id, sp] of standardsById) {
+    map.set(
+      id,
+      extractVolumesNormalized(`${sp.volume ?? ""} ${sp.name}`),
+    );
+  }
+  return map;
+}
+
 function pickCandidateIds(
   scrapedName: string,
-  tokenIndex: ReturnType<typeof buildStandardizedTokenIndex>,
   allStandardIds: number[],
-  standardsById: Map<number, StandardForMatch>,
+  spNormById: Map<number, string>,
+  spVolsById: Map<number, number[]>,
 ): number[] {
-  let ids = candidateStandardizedIds(scrapedName, tokenIndex, allStandardIds);
-  const combinedNameById = (id: number) => {
-    const sp = standardsById.get(id);
-    return sp ? combinedStandardName(sp) : "";
-  };
-
-  if (ids.length > MAX_MATCH_CANDIDATES) {
-    return rankStandardIdsByNameSimilarity(
-      scrapedName,
-      ids,
-      combinedNameById,
-    ).slice(0, MAX_MATCH_CANDIDATES);
-  }
-
-  if (ids.length < 12 && allStandardIds.length) {
-    const extra = rankStandardIdsByNameSimilarity(
-      scrapedName,
-      allStandardIds,
-      combinedNameById,
-    ).slice(0, 40);
-    ids = [...new Set([...ids, ...extra])];
-  }
-
-  if (ids.length > MAX_MATCH_CANDIDATES) {
-    ids = rankStandardIdsByNameSimilarity(
-      scrapedName,
-      ids,
-      combinedNameById,
-    ).slice(0, MAX_MATCH_CANDIDATES);
-  }
-  return ids;
+  if (!allStandardIds.length) return [];
+  const scrapedNorm = normalizeText(scrapedName);
+  const scrapedVols = extractVolumesNormalized(scrapedName);
+  return allStandardIds
+    .map((id) => ({
+      id,
+      rank:
+        compareTwoStrings(scrapedNorm, spNormById.get(id) ?? "") * 0.85 +
+        getBestVolumeScore(scrapedVols, spVolsById.get(id) ?? []) * 0.15,
+    }))
+    .sort((a, b) => b.rank - a.rank)
+    .slice(0, MAX_MATCH_CANDIDATES)
+    .map((row) => row.id);
 }
 
 function buildMatchesForScrapedRows(
@@ -227,17 +234,19 @@ function buildMatchesForScrapedRows(
   standards: StandardForMatch[],
   standardsById: Map<number, StandardForMatch>,
   allStandardIds: number[],
-  tokenIndex: ReturnType<typeof buildStandardizedTokenIndex>,
+  _tokenIndex: ReturnType<typeof buildStandardizedTokenIndex>,
   limit: number,
 ): ProductMatchesResult {
   const matches: ProductMatchRow[] = [];
+  const spNormById = buildSpNormById(standardsById);
+  const spVolsById = buildSpVolsById(standardsById);
 
   for (const scraped of unmatchedProducts) {
     const candidateIds = pickCandidateIds(
       scraped.name,
-      tokenIndex,
       allStandardIds,
-      standardsById,
+      spNormById,
+      spVolsById,
     );
 
     let bestSp: StandardForMatch | null = null;
@@ -495,12 +504,8 @@ async function matchScrapedRows(
   return result;
 }
 
-function poolSizeForLimit(limit: number): number {
-  return Math.min(
-    Math.max(limit * 3, MATCHES_ADMIN_SCORE_POOL),
-    400,
-    MATCHES_PAGE_LIMIT,
-  );
+function poolSizeForLimit(_limit: number): number {
+  return Math.min(MATCHES_ADMIN_SCORE_POOL, MATCHES_PAGE_LIMIT);
 }
 
 export async function getProductMatches(
