@@ -175,6 +175,10 @@ export async function previewBrandPromote(category: string) {
 
   const catalogBrands = await listCatalogBrands();
   const mainCategory = mappedMainCategory(trimmed);
+  const brandsForMatch = catalogBrands.map((b) => ({
+    name: b.name,
+    matchName: b.matchName,
+  }));
 
   const existingBrandRows = mainCategory
     ? await prisma.standardizedProduct.findMany({
@@ -191,22 +195,6 @@ export async function previewBrandPromote(category: string) {
   const existingBrands = existingBrandRows
     .map((row) => row.brand?.trim())
     .filter((name): name is string => Boolean(name));
-
-  const seenMatch = new Set(
-    catalogBrands.map((b) => b.matchName.trim().toLowerCase()),
-  );
-  const brandsForMatch = [
-    ...catalogBrands.map((b) => ({
-      name: b.name,
-      matchName: b.matchName,
-    })),
-  ];
-  for (const brand of existingBrands) {
-    const key = brand.toLowerCase();
-    if (seenMatch.has(key)) continue;
-    seenMatch.add(key);
-    brandsForMatch.push({ name: brand, matchName: brand });
-  }
 
   const totalUnmatchedAvailable = await prisma.product.count({
     where: {
@@ -256,18 +244,9 @@ export async function previewBrandPromote(category: string) {
     list.push(hit);
     byBrand.set(key, list);
   }
-  const catalogLower = new Set(
-    catalogBrands.map((b) => b.name.trim().toLowerCase()),
+  const brandKeys = [...byBrand.keys()].sort((a, b) =>
+    a.localeCompare(b, "sr"),
   );
-  const brandKeys = [...byBrand.keys()].sort((a, b) => {
-    const ca = catalogLower.has(a.toLowerCase()) ? 0 : 1;
-    const cb = catalogLower.has(b.toLowerCase()) ? 0 : 1;
-    if (ca !== cb) return ca - cb;
-    const na = byBrand.get(a)?.length ?? 0;
-    const nb = byBrand.get(b)?.length ?? 0;
-    if (nb !== na) return nb - na;
-    return a.localeCompare(b, "sr");
-  });
 
   const limited: typeof hits = [];
   for (let i = 0; limited.length < BRAND_PROMOTE_LIMIT; i++) {
