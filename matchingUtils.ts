@@ -11,7 +11,8 @@ export const SCRAPED_CATEGORY_TO_STANDARDIZED_MAIN: Record<string, string[]> = {
   "Fruits & Vegetables": ["Voće i povrće"],
   "Healthy Food": ["Zdrava hrana"],
   "Sweets and Snacks": ["Slatkiši i grickalice"],
-  "Meat & Fish": ["Meso i riba"],
+  // Cenoteka: paštete/salame/riba = Meso i riba; gotova jela (Carnex sarma, gulaš…) = Namirnice.
+  "Meat & Fish": ["Meso i riba", "Namirnice", "Namirnice "],
   "Personal Care": ["Licna higijena"],
   "Home Care": ["Kućna hemija"],
   "Baby Care": ["Kutak za bebe"],
