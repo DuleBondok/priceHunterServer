@@ -183,9 +183,7 @@ export async function confirmNewProductMatch(
 
   const standardized = await prisma.standardizedProduct.findUnique({
     where: { id: standardizedProductId },
-    include: {
-      products: { select: { id: true, store: true } },
-    },
+    select: { id: true },
   });
 
   if (!standardized) {
@@ -195,12 +193,6 @@ export async function confirmNewProductMatch(
   if (await isProductBlocked(pending.normalizedName, pending.store)) {
     throw new Error(
       `This listing is blocked (${pending.store} / ${pending.normalizedName}) and cannot be promoted`,
-    );
-  }
-
-  if (standardized.products.some((p) => p.store === pending.store)) {
-    throw new Error(
-      `StandardizedProduct #${standardizedProductId} already has a listing for store "${pending.store}"`,
     );
   }
 
