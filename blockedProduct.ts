@@ -223,6 +223,81 @@ export async function unblockListing(id: number): Promise<void> {
   await blockedOf().delete({ where: { id } });
 }
 
+export async function getBlockedProductsMeta(): Promise<{
+  categories: Array<{ category: string; unmatchedCount: number }>;
+}> {
+  const rows = await prisma.product.groupBy({
+    by: ["category"],
+    where: {
+      standardizedProductId: null,
+      category: { not: ">" },
+      NOT: { category: null },
+    },
+    _count: { _all: true },
+  });
+
+  return {
+    categories: rows
+      .map((row) => ({
+        category: row.category.trim(),
+        unmatchedCount: row._count._all,
+      }))
+      .filter((row) => row.category)
+      .sort((a, b) => a.category.localeCompare(b.category, "sr")),
+  };
+}
+
+export async function listUnmatchedProductsByCategory(input: {
+  category: string;
+  take?: number;
+  skip?: number;
+}): Promise<{
+  category: string;
+  total: number;
+  products: Array<{
+    id: number;
+    name: string;
+    normalizedName: string | null;
+    store: string;
+    category: string;
+    image: string;
+    price: string | null;
+  }>;
+}> {
+  const category = input.category.trim();
+  if (!category) {
+    throw new Error("category is required");
+  }
+
+  const take = Math.min(Math.max(input.take ?? 500, 1), 2000);
+  const skip = Math.max(input.skip ?? 0, 0);
+  const where: Prisma.ProductWhereInput = {
+    standardizedProductId: null,
+    category: { equals: category, mode: Prisma.QueryMode.insensitive },
+  };
+
+  const [total, products] = await Promise.all([
+    prisma.product.count({ where }),
+    prisma.product.findMany({
+      where,
+      orderBy: [{ store: "asc" }, { name: "asc" }],
+      take,
+      skip,
+      select: {
+        id: true,
+        name: true,
+        normalizedName: true,
+        store: true,
+        category: true,
+        image: true,
+        price: true,
+      },
+    }),
+  ]);
+
+  return { category, total, products };
+}
+
 export async function searchProductsByName(input: {
   q: string;
   take?: number;

@@ -28,7 +28,9 @@ import {
 } from "./brandPromote";
 import {
   blockListings,
+  getBlockedProductsMeta,
   listBlockedProducts,
+  listUnmatchedProductsByCategory,
   searchProductsByName,
   unblockListing,
 } from "./blockedProduct";
@@ -1271,6 +1273,35 @@ app.post("/api/admin/brand-promote/confirm", async (req, res) => {
             message.includes("not available")
           ? 400
           : 500;
+    res.status(status).json({ error: message });
+  }
+});
+
+app.get("/api/admin/blocked-products/meta", async (_req, res) => {
+  try {
+    const meta = await getBlockedProductsMeta();
+    res.json(meta);
+  } catch (error) {
+    console.error("blocked-products/meta:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+app.get("/api/admin/blocked-products/unmatched", async (req, res) => {
+  try {
+    const category = parseOptionalCategoryQuery(req.query.category) ?? "";
+    const takeRaw = Number(req.query.take);
+    const skipRaw = Number(req.query.skip);
+    const result = await listUnmatchedProductsByCategory({
+      category,
+      take: Number.isFinite(takeRaw) ? takeRaw : undefined,
+      skip: Number.isFinite(skipRaw) ? skipRaw : undefined,
+    });
+    res.json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Internal error";
+    console.error("blocked-products/unmatched:", error);
+    const status = message.includes("required") ? 400 : 500;
     res.status(status).json({ error: message });
   }
 });
