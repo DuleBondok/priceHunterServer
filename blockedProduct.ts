@@ -230,8 +230,7 @@ export async function getBlockedProductsMeta(): Promise<{
     by: ["category"],
     where: {
       standardizedProductId: null,
-      category: { not: ">" },
-      NOT: { category: null },
+      NOT: { category: { in: [">", ""] } },
     },
     _count: { _all: true },
   });
