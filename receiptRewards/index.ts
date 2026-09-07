@@ -17,4 +17,9 @@ export {
 
 export { getUserPointsSummary, getUserPointsLedger } from './reads';
 
+export {
+  listChallengeCatalog,
+  listChallengeUsers,
+} from './adminChallengeUsers';
+
 export { ensureReceiptRewardsCatalog } from './seedCatalog';

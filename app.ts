@@ -58,6 +58,8 @@ import { normalizeReceiptScannedUrl } from "./utils/receiptQrUrl";
 import {
   confirmReceiptScan,
   ensureReceiptRewardsCatalog,
+  listChallengeCatalog,
+  listChallengeUsers,
   rejectReceiptScan,
 } from "./receiptRewards";
 import multer from "multer";
@@ -1379,6 +1381,49 @@ app.delete("/api/admin/blocked-products/:id", async (req, res) => {
     console.error("blocked-products unblock:", error);
     const status = message.includes("Record to delete does not exist") ? 404 : 500;
     res.status(status).json({ error: message });
+  }
+});
+
+app.get("/api/admin/challenge-users/meta", async (_req, res) => {
+  try {
+    const meta = await listChallengeCatalog(prisma);
+    res.json(meta);
+  } catch (error) {
+    console.error("challenge-users/meta:", error);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+});
+
+app.get("/api/admin/challenge-users", async (req, res) => {
+  try {
+    const email =
+      typeof req.query.email === "string"
+        ? req.query.email
+        : typeof req.query.userEmail === "string"
+          ? req.query.userEmail
+          : "";
+    const challengeCode =
+      typeof req.query.challengeCode === "string" ? req.query.challengeCode : "";
+    const challengeIdRaw = Number(req.query.challengeId);
+    const takeRaw = Number(req.query.take);
+    const statusRaw =
+      typeof req.query.status === "string" ? req.query.status.trim() : "all";
+    const status =
+      statusRaw === "in_progress" || statusRaw === "completed" ? statusRaw : "all";
+
+    const result = await listChallengeUsers(prisma, {
+      email,
+      challengeCode,
+      challengeId: Number.isFinite(challengeIdRaw) ? challengeIdRaw : undefined,
+      status,
+      take: Number.isFinite(takeRaw) ? takeRaw : undefined,
+    });
+    res.json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Internal error";
+    console.error("challenge-users:", error);
+    const status = message.includes("Provide email") ? 400 : 500;
+    res.status(status).json({ message });
   }
 });
 
