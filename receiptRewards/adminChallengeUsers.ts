@@ -31,10 +31,12 @@ export async function listChallengeCatalog(prisma: Db) {
     },
   });
 
-  const order = new Map(CHALLENGE_PIPELINE.map((code, i) => [code, i]));
+  const order = new Map<string, number>(
+    CHALLENGE_PIPELINE.map((code, i) => [code, i]),
+  );
   challenges.sort((a, b) => {
-    const ai = order.has(a.code) ? (order.get(a.code) as number) : 999;
-    const bi = order.has(b.code) ? (order.get(b.code) as number) : 999;
+    const ai = order.get(a.code) ?? 999;
+    const bi = order.get(b.code) ?? 999;
     if (ai !== bi) return ai - bi;
     return a.id - b.id;
   });
