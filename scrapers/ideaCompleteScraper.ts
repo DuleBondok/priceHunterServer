@@ -1,4 +1,5 @@
 import { Page } from "puppeteer";
+import { normalizeDiscountPair } from "../utils/normalizeDiscountPrice";
 import { launchBrowser } from "./puppeteerBrowser";
 import { parseIdeaStaraCijenaRsd } from "./ideaStaraCijenaParse";
 
@@ -504,10 +505,18 @@ export async function scrapeIdeaProducts(
           return data;
         }, category);
 
-        const products: Product[] = rows.map(({ oldPriceRaw, ...rest }) => ({
-          ...rest,
-          priceBeforeDiscount: parseIdeaStaraCijenaRsd(oldPriceRaw),
-        }));
+        const products: Product[] = rows.map(({ oldPriceRaw, ...rest }) => {
+          const normalized = normalizeDiscountPair({
+            price: rest.price,
+            priceBeforeDiscount: parseIdeaStaraCijenaRsd(oldPriceRaw),
+            requiresLoyaltyCard: rest.requiresLoyaltyCard,
+          });
+          return {
+            ...rest,
+            price: normalized.price,
+            priceBeforeDiscount: normalized.priceBeforeDiscount,
+          };
+        });
 
         if (products.length === 0) {
           console.log("No products on this page; stopping this listing.");

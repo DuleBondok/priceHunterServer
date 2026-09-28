@@ -1,6 +1,7 @@
 import { launchBrowser } from "./puppeteerBrowser";
 import { saveProducts, ProductData } from "../productService";
 import { parseIdeaStaraCijenaRsd } from "./ideaStaraCijenaParse";
+import { normalizeDiscountPair } from "../utils/normalizeDiscountPrice";
 
 async function scrapeMaxi(): Promise<ProductData[]> {
   try {
@@ -138,10 +139,17 @@ async function scrapeMaxi(): Promise<ProductData[]> {
         return products;
       });
 
-      const items: ProductData[] = rawItems.map(({ oldPriceRaw, ...rest }) => ({
-        ...rest,
-        priceBeforeDiscount: parseIdeaStaraCijenaRsd(oldPriceRaw),
-      }));
+      const items: ProductData[] = rawItems.map(({ oldPriceRaw, ...rest }) => {
+        const normalized = normalizeDiscountPair({
+          price: rest.price,
+          priceBeforeDiscount: parseIdeaStaraCijenaRsd(oldPriceRaw),
+        });
+        return {
+          ...rest,
+          price: normalized.price,
+          priceBeforeDiscount: normalized.priceBeforeDiscount,
+        };
+      });
 
       if (items.length === 0) break;
 

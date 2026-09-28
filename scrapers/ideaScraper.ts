@@ -50,6 +50,7 @@
 
 import { launchBrowser } from "./puppeteerBrowser";
 import { parseIdeaStaraCijenaRsd } from "./ideaStaraCijenaParse";
+import { normalizeDiscountPair } from "../utils/normalizeDiscountPrice";
 
 interface Product {
   name: string;
@@ -164,10 +165,18 @@ export async function scrapeIdeaProducts(urls: string[]): Promise<Product[]> {
         return data;
       });
 
-      const products: Product[] = rows.map(({ oldPriceRaw, ...rest }) => ({
-        ...rest,
-        priceBeforeDiscount: parseIdeaStaraCijenaRsd(oldPriceRaw),
-      }));
+      const products: Product[] = rows.map(({ oldPriceRaw, ...rest }) => {
+        const normalized = normalizeDiscountPair({
+          price: rest.price,
+          priceBeforeDiscount: parseIdeaStaraCijenaRsd(oldPriceRaw),
+          requiresLoyaltyCard: rest.requiresLoyaltyCard,
+        });
+        return {
+          ...rest,
+          price: normalized.price,
+          priceBeforeDiscount: normalized.priceBeforeDiscount,
+        };
+      });
 
       if (products.length === 0) {
         console.log(`No products found on page. Skipping...`);

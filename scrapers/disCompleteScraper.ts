@@ -1,6 +1,7 @@
 import { Browser, Page } from "puppeteer";
 import { launchBrowser } from "./puppeteerBrowser";
 import { ProductData, saveProducts } from "../productService";
+import { normalizeDiscountPair } from "../utils/normalizeDiscountPrice";
 
 type DisCategoryEntry = {
   code: string;
@@ -96,52 +97,62 @@ async function gotoWithRetry(
   throw lastError;
 }
 
-async function waitForProducts(page: Page): Promise<void> {
-  await page.waitForSelector('a[href^="/artikli/"]', { timeout: 30000 });
-  await page.waitForFunction(
-    () => {
-      const cards = Array.from(document.querySelectorAll('a[href^="/artikli/"]'));
-      if (cards.length === 0) return false;
-      const readyCount = cards.filter((card) => {
-        const name =
-          card
-            .querySelector("p.font-bold.text-black, p[class*='line-clamp']")
-            ?.textContent?.trim() ?? "";
-        const hasOutOfStockSignal = /obavesti me|notify me|nema na stanju|rasprodato|nije dostupno/i.test(
-          card.textContent?.replace(/\s+/g, " ").trim() ?? "",
-        );
+async function waitForProducts(page: Page): Promise<boolean> {
+  try {
+    await page.waitForSelector('a[href^="/artikli/"]', { timeout: 30000 });
+    await page.waitForFunction(
+      () => {
+        const cards = Array.from(document.querySelectorAll('a[href^="/artikli/"]'));
+        if (cards.length === 0) return false;
+        const readyCount = cards.filter((card) => {
+          const name =
+            card
+              .querySelector("p.font-bold.text-black, p[class*='line-clamp']")
+              ?.textContent?.trim() ?? "";
+          const hasOutOfStockSignal = /obavesti me|notify me|nema na stanju|rasprodato|nije dostupno/i.test(
+            card.textContent?.replace(/\s+/g, " ").trim() ?? "",
+          );
 
-        const hasPriceSignal = Array.from(card.querySelectorAll("p"))
-          .map((p) => p.textContent?.trim() ?? "")
-          .some((txt) => /^\d[\d.,]*$/.test(txt) || /(\d[\d.,]*)\s*(RSD|DIN)\b/i.test(txt));
+          const hasPriceSignal = Array.from(card.querySelectorAll("p"))
+            .map((p) => p.textContent?.trim() ?? "")
+            .some((txt) => /^\d[\d.,]*$/.test(txt) || /(\d[\d.,]*)\s*(RSD|DIN)\b/i.test(txt));
 
-        return !!name && (hasOutOfStockSignal || hasPriceSignal);
-      }).length;
+          return !!name && (hasOutOfStockSignal || hasPriceSignal);
+        }).length;
 
-      return readyCount >= Math.max(1, Math.floor(cards.length * 0.65));
-    },
-    { timeout: 20000 },
-  );
+        return readyCount >= Math.max(1, Math.floor(cards.length * 0.65));
+      },
+      { timeout: 20000 },
+    );
+    return true;
+  } catch {
+    return false;
+  }
 }
 
-async function waitForProductsStable(page: Page): Promise<void> {
-  await waitForProducts(page);
-  await page.waitForFunction(
-    () => {
-      const cards = document.querySelectorAll('a[href^="/artikli/"]').length;
-      const key = "__disCardsStableCount";
-      const sameKey = "__disCardsStableSameCount";
-      const w = window as unknown as Record<string, number>;
-      if (w[key] === cards) {
-        w[sameKey] = (w[sameKey] ?? 0) + 1;
-      } else {
-        w[key] = cards;
-        w[sameKey] = 0;
-      }
-      return (w[sameKey] ?? 0) >= 2;
-    },
-    { timeout: 7000 },
-  );
+async function waitForProductsStable(page: Page): Promise<boolean> {
+  if (!(await waitForProducts(page))) return false;
+  try {
+    await page.waitForFunction(
+      () => {
+        const cards = document.querySelectorAll('a[href^="/artikli/"]').length;
+        const key = "__disCardsStableCount";
+        const sameKey = "__disCardsStableSameCount";
+        const w = window as unknown as Record<string, number>;
+        if (w[key] === cards) {
+          w[sameKey] = (w[sameKey] ?? 0) + 1;
+        } else {
+          w[key] = cards;
+          w[sameKey] = 0;
+        }
+        return (w[sameKey] ?? 0) >= 2;
+      },
+      { timeout: 7000 },
+    );
+  } catch {
+    // Cards are present; scrape even if the count did not fully stabilize.
+  }
+  return true;
 }
 
 async function applyCategory(page: Page, code: string): Promise<void> {
@@ -156,7 +167,10 @@ async function applyCategory(page: Page, code: string): Promise<void> {
     },
     { timeout: 15000 },
   );
-  await waitForProducts(page);
+  const ready = await waitForProducts(page);
+  if (!ready) {
+    throw new Error(`[DIS] No product cards after selecting category ${code}`);
+  }
 }
 
 async function scrapeCurrentPage(
@@ -259,7 +273,10 @@ async function scrapeCurrentPage(
     return {
       name: row.name,
       price: formatCurrentPriceRsd(row.currentPriceRaw),
-      priceBeforeDiscount: parsePriceNumber(row.oldPriceRaw),
+      priceBeforeDiscount: normalizeDiscountPair({
+        price: formatCurrentPriceRsd(row.currentPriceRaw),
+        priceBeforeDiscount: parsePriceNumber(row.oldPriceRaw),
+      }).priceBeforeDiscount,
       image: image || "",
       availability: row.availability,
       store: "DIS",
@@ -375,7 +392,22 @@ async function scrapeDisCategory(
     let pageNum = 1;
     while (pageNum <= maxPages) {
       console.log(`[DIS] ${categoryEntry.code} (${categoryEntry.label}) page ${pageNum}`);
-      await waitForProductsStable(page);
+      let ready = await waitForProductsStable(page);
+      if (!ready) {
+        console.warn(
+          `[DIS] ${categoryEntry.code}: no product cards on page ${pageNum}, reloading once`,
+        );
+        await page.reload({ waitUntil: "domcontentloaded", timeout: 60000 }).catch(() => {
+          /* continue to second wait */
+        });
+        ready = await waitForProductsStable(page);
+      }
+      if (!ready) {
+        console.warn(
+          `[DIS] ${categoryEntry.code}: still no product cards on page ${pageNum}, stopping category`,
+        );
+        break;
+      }
       const products = await scrapeCurrentPageWithRetry(page, categoryEntry.category);
 
       if (products.length === 0) {

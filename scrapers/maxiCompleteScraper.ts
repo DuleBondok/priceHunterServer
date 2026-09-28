@@ -2,6 +2,7 @@ import { Page } from "puppeteer";
 import { launchBrowser } from "./puppeteerBrowser";
 import { saveProducts, ProductData } from "../productService";
 import { parseIdeaStaraCijenaRsd } from "./ideaStaraCijenaParse";
+import { normalizeDiscountPair } from "../utils/normalizeDiscountPrice";
 
 // 🔹 Add all category base URLs here (WITHOUT pageNumber value)
 const CATEGORY_URLS = [
@@ -48,6 +49,10 @@ const CATEGORY_URLS = [
   {
     url: `https://www.maxi.rs/Pekara-torte-i-kolachi/c/05?q=%3Arelevance&sort=relevance&pageNumber=`,
     category: "Bakery",
+  },
+  {
+    url: `https://www.maxi.rs/Slatki-i-slani-konditori/c/07?q=%3Arelevance&sort=relevance&pageNumber=`,
+    category: "Sweets and Snacks",
   },
     {
     url: `https://www.maxi.rs/Pakovana-hrana-i-osnovne-namirnice/Shecjer/c/0801?q=%3Arelevance&sort=relevance&pageNumber=`,
@@ -285,10 +290,17 @@ async function extractProducts(page: Page): Promise<ProductData[]> {
     return products;
   });
 
-  return rows.map(({ oldPriceRaw, ...rest }) => ({
-    ...rest,
-    priceBeforeDiscount: parseIdeaStaraCijenaRsd(oldPriceRaw),
-  }));
+  return rows.map(({ oldPriceRaw, ...rest }) => {
+    const normalized = normalizeDiscountPair({
+      price: rest.price,
+      priceBeforeDiscount: parseIdeaStaraCijenaRsd(oldPriceRaw),
+    });
+    return {
+      ...rest,
+      price: normalized.price,
+      priceBeforeDiscount: normalized.priceBeforeDiscount,
+    };
+  });
 }
 
 /** Load PLP and read tiles; retries page 1 when the grid hydrates late (common under parallel tabs). */

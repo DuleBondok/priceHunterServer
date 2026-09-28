@@ -11,6 +11,7 @@ import {
   loadBlockedKeysForStores,
   purgeBlockedListingsForStores,
 } from "./blockedProduct";
+import { normalizeDiscountPair } from "./utils/normalizeDiscountPrice";
 
 export type ProductData = {
   name: string;
@@ -250,15 +251,32 @@ export type PromotePendingNewProductsResult = {
   skippedBlocked: number;
 };
 
-/**
- * Move all unprocessed NewProducts rows for a store into Product.
- * Deletes each NewProducts row after it is handled (created or already in Product).
- */
 export async function promotePendingNewProductsForStore(
   store: string,
 ): Promise<PromotePendingNewProductsResult> {
+  return promotePendingNewProducts({ store });
+}
+
+/**
+ * Move unprocessed NewProducts rows into Product, then delete those NewProducts
+ * rows (created, already in Product, or blocked).
+ */
+export async function promotePendingNewProducts(filter: {
+  store?: string;
+  category?: string;
+}): Promise<PromotePendingNewProductsResult> {
+  const store = filter.store?.trim();
+  const category = filter.category?.trim();
+  if (!store && !category) {
+    throw new Error("Provide store and/or category");
+  }
+
   const pending = await prisma.newProducts.findMany({
-    where: { store, processedAt: null },
+    where: {
+      processedAt: null,
+      ...(store ? { store } : {}),
+      ...(category ? { category } : {}),
+    },
     orderBy: { id: "asc" },
   });
 
@@ -266,26 +284,28 @@ export async function promotePendingNewProductsForStore(
     return { pending: 0, promoted: 0, skippedExisting: 0, skippedBlocked: 0 };
   }
 
+  const stores = [...new Set(pending.map((row) => row.store))];
   const existing = await prisma.product.findMany({
-    where: { store },
-    select: { normalizedName: true },
+    where: { store: { in: stores } },
+    select: { normalizedName: true, store: true },
   });
-  const existingNames = new Set(
+  const existingKeys = new Set(
     existing
-      .map((row) => row.normalizedName)
-      .filter((name): name is string => Boolean(name)),
+      .filter((row) => Boolean(row.normalizedName))
+      .map((row) => blockedProductKey(row.normalizedName as string, row.store)),
   );
-  const blockedKeys = await loadBlockedKeysForStores([store]);
+  const blockedKeys = await loadBlockedKeysForStores(stores);
 
   const toCreate: typeof pending = [];
   let skippedExisting = 0;
   let skippedBlocked = 0;
   for (const row of pending) {
-    if (blockedKeys.has(blockedProductKey(row.normalizedName, row.store))) {
+    const key = blockedProductKey(row.normalizedName, row.store);
+    if (blockedKeys.has(key)) {
       skippedBlocked++;
       continue;
     }
-    if (existingNames.has(row.normalizedName)) {
+    if (existingKeys.has(key)) {
       skippedExisting++;
       continue;
     }
@@ -295,18 +315,27 @@ export async function promotePendingNewProductsForStore(
 
   await runInBatches(toCreate, 100, async (batch) => {
     await prisma.product.createMany({
-      data: batch.map((row) => ({
-        name: row.name,
-        normalizedName: row.normalizedName,
-        price: row.price,
-        priceBeforeDiscount: row.priceBeforeDiscount,
-        store: row.store,
-        category: row.category,
-        image: row.image,
-        lastSeenAt: row.lastSeenAt ?? promotedAt,
-        isAvailable: true,
-        consecutiveMissingDays: 0,
-      })),
+      data: batch.map((row) => {
+        const normalized = normalizeDiscountPair({
+          price: row.price,
+          priceBeforeDiscount:
+            row.priceBeforeDiscount != null
+              ? Number(row.priceBeforeDiscount)
+              : null,
+        });
+        return {
+          name: row.name,
+          normalizedName: row.normalizedName,
+          price: normalized.price,
+          priceBeforeDiscount: normalized.priceBeforeDiscount,
+          store: row.store,
+          category: row.category,
+          image: row.image,
+          lastSeenAt: row.lastSeenAt ?? promotedAt,
+          isAvailable: true,
+          consecutiveMissingDays: 0,
+        };
+      }),
       skipDuplicates: true,
     });
   });
@@ -407,7 +436,7 @@ export async function saveProducts(
   const newProductMap = new Map(
     existingNewProducts.map((p) => [
       productKey(p.normalizedName, p.store),
-      { id: p.id },
+      { id: p.id, normalizedName: p.normalizedName, store: p.store },
     ]),
   );
 
@@ -425,6 +454,8 @@ export async function saveProducts(
     number,
     {
       id: number;
+      normalizedName: string;
+      store: string;
       price: string | null;
       priceBeforeDiscount: number | null;
       image: string;
@@ -445,7 +476,17 @@ export async function saveProducts(
   const seenByStore = new Map<string, Set<string>>();
   const seenAt = now();
 
-  for (const p of products) {
+  for (const raw of products) {
+    const normalizedPrices = normalizeDiscountPair({
+      price: raw.price,
+      priceBeforeDiscount: raw.priceBeforeDiscount ?? null,
+      requiresLoyaltyCard: raw.requiresLoyaltyCard,
+    });
+    const p: ProductData = {
+      ...raw,
+      price: normalizedPrices.price,
+      priceBeforeDiscount: normalizedPrices.priceBeforeDiscount,
+    };
     const normalizedName = normalizeName(p.name);
     const key = productKey(normalizedName, p.store);
     if (blockedKeys.has(key)) {
@@ -523,6 +564,8 @@ export async function saveProducts(
       } else if (existingNew && existingNew.id > 0) {
         newProductUpdateById.set(existingNew.id, {
           id: existingNew.id,
+          normalizedName: existingNew.normalizedName,
+          store: existingNew.store,
           price: p.price,
           priceBeforeDiscount: p.priceBeforeDiscount ?? null,
           image: p.image,
@@ -547,7 +590,7 @@ export async function saveProducts(
         lastSeenAt: seenAt,
       });
       pendingNewProductIndexByKey.set(key, idx);
-      newProductMap.set(key, { id: 0 });
+      newProductMap.set(key, { id: 0, normalizedName, store: p.store });
       newProductsCreatedCount++;
     }
   }
@@ -613,7 +656,7 @@ export async function saveProducts(
   await runInBatches(updateOps, PRISMA_WRITE_CONCURRENCY, async (batch) => {
     await Promise.all(
       batch.map((u) =>
-        prisma.product.update({
+        prisma.product.updateMany({
           where: { id: u.id },
           data: {
             price: u.price,
@@ -638,8 +681,8 @@ export async function saveProducts(
   if (newProductUpdateOps.length > 0) {
     await runInBatches(newProductUpdateOps, PRISMA_WRITE_CONCURRENCY, async (batch) => {
       await Promise.all(
-        batch.map((u) =>
-          prisma.newProducts.update({
+        batch.map(async (u) => {
+          const updated = await prisma.newProducts.updateMany({
             where: { id: u.id },
             data: {
               price: u.price,
@@ -647,8 +690,27 @@ export async function saveProducts(
               image: u.image,
               lastSeenAt: u.lastSeenAt,
             },
-          }),
-        ),
+          });
+          // Promoted/deleted between snapshot and write — apply to Product if it exists.
+          if (updated.count === 0) {
+            await prisma.product.updateMany({
+              where: {
+                normalizedName: u.normalizedName,
+                store: u.store,
+                flaggedForReview: false,
+              },
+              data: {
+                price: u.price,
+                priceBeforeDiscount: u.priceBeforeDiscount,
+                image: u.image,
+                lastSeenAt: u.lastSeenAt,
+                isAvailable: true,
+                consecutiveMissingDays: 0,
+                updatedAt: now(),
+              },
+            });
+          }
+        }),
       );
     });
   }
