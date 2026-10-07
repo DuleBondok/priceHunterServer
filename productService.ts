@@ -12,6 +12,7 @@ import {
   purgeBlockedListingsForStores,
 } from "./blockedProduct";
 import { normalizeDiscountPair } from "./utils/normalizeDiscountPrice";
+import { ideaProductIdFromImage } from "./utils/ideaProductId";
 
 export type ProductData = {
   name: string;
@@ -398,6 +399,7 @@ export async function saveProducts(
         store: true,
         category: true,
         price: true,
+        image: true,
         standardizedProductId: true,
         isAvailable: true,
         flaggedForReview: true,
@@ -440,6 +442,23 @@ export async function saveProducts(
     ]),
   );
 
+  // Idea renames listings on its site; its listing id (in the image path) stays stable.
+  const ideaProductByListingId = new Map<string, (typeof existingProducts)[number]>();
+  const ambiguousIdeaListingIds = new Set<string>();
+  for (const p of existingProducts) {
+    if (p.store !== "Idea" || !p.normalizedName) continue;
+    const listingId = ideaProductIdFromImage(p.image);
+    if (!listingId) continue;
+    if (ideaProductByListingId.has(listingId)) ambiguousIdeaListingIds.add(listingId);
+    ideaProductByListingId.set(listingId, p);
+  }
+  for (const listingId of ambiguousIdeaListingIds) {
+    ideaProductByListingId.delete(listingId);
+  }
+  const seenProductIds = new Set<number>();
+  const staleNewProductIds: number[] = [];
+  let renamedCount = 0;
+
   let newProductsCreatedCount = 0;
   let updateCount = 0;
   let newProductsUpdatedCount = 0;
@@ -472,6 +491,7 @@ export async function saveProducts(
     consecutiveMissingDays: number;
     requiresLoyaltyCard: boolean;
     offerEndsOn: string | null;
+    rename?: { name: string; normalizedName: string };
   }[] = [];
   const seenByStore = new Map<string, Set<string>>();
   const seenAt = now();
@@ -498,14 +518,34 @@ export async function saveProducts(
     }
     seenByStore.get(p.store)?.add(normalizedName);
 
-    const existing = productMap.get(key);
+    let existing = productMap.get(key);
+    let rename: { name: string; normalizedName: string } | undefined;
+
+    // STEP 1b: Idea listing renamed — same listing id, different name.
+    if (!existing && p.store === "Idea") {
+      const listingId = ideaProductIdFromImage(p.image);
+      const byListing = listingId ? ideaProductByListingId.get(listingId) : undefined;
+      if (byListing && !seenProductIds.has(byListing.id) && byListing.normalizedName) {
+        existing = productMap.get(productKey(byListing.normalizedName, byListing.store));
+        if (existing) {
+          productMap.delete(productKey(byListing.normalizedName, byListing.store));
+          productMap.set(key, existing);
+          rename = { name: p.name, normalizedName };
+          const staged = newProductMap.get(key);
+          if (staged && staged.id > 0) staleNewProductIds.push(staged.id);
+          newProductMap.delete(key);
+        }
+      }
+    }
 
     // STEP 1: existing Product — skip entirely when flagged for review
     if (existing) {
+      seenProductIds.add(existing.id);
       if (existing.flaggedForReview) {
         flaggedSkippedCount++;
         continue;
       }
+      if (rename) renamedCount++;
 
       const allowsNullPriceUpdate = p.availability === "out_of_stock";
       const preserveExistingPrice =
@@ -538,6 +578,7 @@ export async function saveProducts(
         consecutiveMissingDays: 0,
         requiresLoyaltyCard: p.requiresLoyaltyCard ?? false,
         offerEndsOn: p.offerEndsOn ?? null,
+        rename,
       });
 
       updateCount++;
@@ -613,6 +654,7 @@ export async function saveProducts(
         if (existing.store !== store) continue;
         if (!existing.normalizedName) continue;
         if (existing.flaggedForReview) continue;
+        if (seenProductIds.has(existing.id)) continue;
         if (seen.has(existing.normalizedName)) continue;
         if (
           clearCategoryFilter &&
@@ -653,24 +695,44 @@ export async function saveProducts(
     });
   }
 
+  if (staleNewProductIds.length > 0) {
+    await prisma.newProducts.deleteMany({ where: { id: { in: staleNewProductIds } } });
+  }
+
   await runInBatches(updateOps, PRISMA_WRITE_CONCURRENCY, async (batch) => {
     await Promise.all(
-      batch.map((u) =>
-        prisma.product.updateMany({
-          where: { id: u.id },
-          data: {
-            price: u.price,
-            priceBeforeDiscount: u.priceBeforeDiscount,
-            image: u.image,
-            lastSeenAt: u.lastSeenAt,
-            isAvailable: u.isAvailable,
-            consecutiveMissingDays: u.consecutiveMissingDays,
-            requiresLoyaltyCard: u.requiresLoyaltyCard,
-            offerEndsOn: u.offerEndsOn,
-            updatedAt: now(),
-          },
-        }),
-      ),
+      batch.map(async (u) => {
+        const data = {
+          price: u.price,
+          priceBeforeDiscount: u.priceBeforeDiscount,
+          image: u.image,
+          lastSeenAt: u.lastSeenAt,
+          isAvailable: u.isAvailable,
+          consecutiveMissingDays: u.consecutiveMissingDays,
+          requiresLoyaltyCard: u.requiresLoyaltyCard,
+          offerEndsOn: u.offerEndsOn,
+          updatedAt: now(),
+        };
+        if (!u.rename) {
+          await prisma.product.updateMany({ where: { id: u.id }, data });
+          return;
+        }
+        try {
+          await prisma.product.updateMany({
+            where: { id: u.id },
+            data: { ...data, ...u.rename },
+          });
+        } catch (err) {
+          if (
+            err instanceof Prisma.PrismaClientKnownRequestError &&
+            err.code === "P2002"
+          ) {
+            await prisma.product.updateMany({ where: { id: u.id }, data });
+            return;
+          }
+          throw err;
+        }
+      }),
     );
   });
 
@@ -740,7 +802,7 @@ export async function saveProducts(
   const totalInDb = await prisma.product.count();
 
   console.log(
-    `⚡ Product updated: ${updateCount}, NewProducts created: ${newProductsCreatedCount}, NewProducts updated: ${newProductsUpdatedCount}, Flagged skipped: ${flaggedSkippedCount}, Blocked skipped: ${blockedSkippedCount}, Missing marked: ${missingIncrementIds.length}, Hidden (${AVAILABILITY_GRACE_DAYS}d+): ${availabilityHidden}, Products in DB: ${totalInDb}`,
+    `⚡ Product updated: ${updateCount} (renamed by Idea id: ${renamedCount}), NewProducts created: ${newProductsCreatedCount}, NewProducts updated: ${newProductsUpdatedCount}, Flagged skipped: ${flaggedSkippedCount}, Blocked skipped: ${blockedSkippedCount}, Missing marked: ${missingIncrementIds.length}, Hidden (${AVAILABILITY_GRACE_DAYS}d+): ${availabilityHidden}, Products in DB: ${totalInDb}`,
   );
 
   return {
