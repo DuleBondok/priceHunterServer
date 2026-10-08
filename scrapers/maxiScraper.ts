@@ -62,7 +62,7 @@ async function scrapeMaxi(): Promise<ProductData[]> {
               '[data-testid="product-block"]',
             )?.parentElement;
             const nameLink = tile?.querySelector(
-              '[data-testid="product-block-name-link"]',
+              '[data-testid="product-block-name-link"], [data-testid="product-block-product-name"]',
             );
             const brand =
               nameLink

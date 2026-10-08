@@ -208,7 +208,7 @@ async function extractProducts(page: Page): Promise<ProductData[]> {
         )?.parentElement;
 
         const nameLink = tile?.querySelector(
-          '[data-testid="product-block-name-link"]',
+          '[data-testid="product-block-name-link"], [data-testid="product-block-product-name"]',
         );
 
         const brand =
