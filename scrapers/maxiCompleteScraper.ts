@@ -256,8 +256,13 @@ async function extractProducts(page: Page): Promise<ProductData[]> {
           '[data-testid="product-block-old-price"]',
         );
 
-        const oldPriceRaw =
-          oldPriceContainer?.querySelector("span")?.textContent?.trim() || null;
+        // Visible text is the 30-day lowest price; the regular price is only in aria-label.
+        const oldAria = oldPriceContainer
+          ?.getAttribute("aria-label")
+          ?.match(/([\d.]+)\s*dinara(?:\s*i\s*(\d+)\s*para)?/);
+        const oldPriceRaw = oldAria
+          ? `${oldAria[1].replace(/\./g, "")}.${(oldAria[2] || "0").padStart(2, "0")}`
+          : oldPriceContainer?.querySelector("span")?.textContent?.trim() || null;
 
         const imageEl = tile?.querySelector(
           'img[data-testid="product-block-image"]',
