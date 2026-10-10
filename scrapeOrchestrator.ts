@@ -7,7 +7,7 @@ import { scraperProcessEnv } from "./scrapers/puppeteerEnv";
 type StepStatus = "success" | "failed";
 type RunStatus = "running" | "success" | "partial" | "failed";
 
-type ScrapeStore = "Idea" | "Maxi" | "DIS" | "Univerexport";
+type ScrapeStore = "Idea" | "Maxi" | "DIS" | "Univerexport" | "Zlatan Trag";
 
 export type ScrapeRunStep = {
   store: ScrapeStore;
@@ -86,6 +86,11 @@ const SCRAPER_STEPS = [
     store: "Univerexport" as const,
     command: "npx",
     args: ["ts-node", "scrapers/univerexportCompleteScraper.ts"],
+  },
+  {
+    store: "Zlatan Trag" as const,
+    command: "npx",
+    args: ["ts-node", "scrapers/zlatanTragCompleteScraper.ts"],
   },
 ];
 
@@ -227,6 +232,7 @@ function extractFinalInfoFromLogs(
   const univerexportCollected = joined.match(
     /\[Univerexport\]\s*Total collected:\s*(\d+)/i,
   );
+  const zlatanTragCollected = joined.match(/\[Zlatan Trag\]\s*Total collected:\s*(\d+)/i);
 
   const info: {
     scraped?: number;
@@ -290,6 +296,10 @@ function extractFinalInfoFromLogs(
 
   if (info.scraped == null && univerexportCollected) {
     info.scraped = Number(univerexportCollected[1]);
+  }
+
+  if (info.scraped == null && zlatanTragCollected) {
+    info.scraped = Number(zlatanTragCollected[1]);
   }
 
   if (

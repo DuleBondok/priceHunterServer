@@ -114,7 +114,7 @@ export function categoryAlignmentScore(
 }
 
 /** Max distinct store listings linked to one standardized product. */
-export const MAX_STORE_LINKS_PER_STANDARD = 4;
+export const MAX_STORE_LINKS_PER_STANDARD = 6;
 
 export function linkedStoreCount(products: Array<{ store: string }>): number {
   return new Set(products.map((p) => p.store)).size;

@@ -333,6 +333,25 @@ model CatalogBrand {
 }
 
 /// Permanently excluded listings. Scrape will not recreate Product/NewProducts for this key.
+/// Price of a chain listing in one physical object, for chains that price per object.
+/// Linked to Product / NewProducts by (normalizedName, store); replaced on every full scrape.
+model StoreLocationPrice {
+  id                  Int      @id @default(autoincrement())
+  store               String
+  /// Chain's own object code (Zlatan Trag: `org` query param).
+  storeCode           String
+  normalizedName      String
+  name                String
+  price               String?
+  priceBeforeDiscount Decimal?
+  isAvailable         Boolean  @default(true)
+  offerEndsOn         String?
+  lastSeenAt          DateTime @default(now())
+
+  @@unique([store, normalizedName, storeCode])
+  @@index([store, storeCode])
+}
+
 model BlockedProduct {
   id             Int      @id @default(autoincrement())
   normalizedName String
