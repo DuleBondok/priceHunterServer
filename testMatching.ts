@@ -218,12 +218,17 @@ function pickCandidateIds(
   const scrapedNorm = normalizeText(scrapedName);
   const scrapedVols = extractVolumesNormalized(scrapedName);
   return allStandardIds
-    .map((id) => ({
-      id,
-      rank:
-        compareTwoStrings(scrapedNorm, spNormById.get(id) ?? "") * 0.85 +
-        getBestVolumeScore(scrapedVols, spVolsById.get(id) ?? []) * 0.15,
-    }))
+    .map((id) => {
+      const fuzzy = compareTwoStrings(scrapedNorm, spNormById.get(id) ?? "");
+      const spVols = spVolsById.get(id) ?? [];
+      const vol = getBestVolumeScore(scrapedVols, spVols);
+      const bothVolumesKnown = scrapedVols.length > 0 && spVols.length > 0;
+      // Prefer same quantity heavily when both sides have a parseable volume.
+      const rank = bothVolumesKnown
+        ? fuzzy * 0.4 + vol * 0.6
+        : fuzzy * 0.85 + vol * 0.15;
+      return { id, rank };
+    })
     .sort((a, b) => b.rank - a.rank)
     .slice(0, MAX_MATCH_CANDIDATES)
     .map((row) => row.id);

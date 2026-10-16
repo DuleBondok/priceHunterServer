@@ -252,14 +252,20 @@ export function computeMatchScore(
     return null;
   }
 
-  const volumeWeight = bothVolumesKnown ? 0.28 : 0.12;
-  const nameWeight = bothVolumesKnown ? 0.37 : 0.53;
-  const finalScore =
+  // Exact quantity match (28g↔28g, 1l↔1l) should dominate ranking.
+  const exactVolume = bothVolumesKnown && volumeScore >= 0.98;
+  const volumeWeight = exactVolume ? 0.45 : bothVolumesKnown ? 0.28 : 0.12;
+  const nameWeight = exactVolume ? 0.2 : bothVolumesKnown ? 0.37 : 0.53;
+  let finalScore =
     Math.max(similarity, fuzzyScore * 0.95) * nameWeight +
     fuzzyScore * 0.15 +
     volumeScore * volumeWeight +
     brandMatch * 0.1 +
     categoryScore * 0.1;
+
+  if (exactVolume) {
+    finalScore = Math.min(1, finalScore + 0.12);
+  }
 
   if (finalScore < minScore) return null;
 
