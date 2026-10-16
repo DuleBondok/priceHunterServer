@@ -46,7 +46,12 @@ export function normalizeText(text: string): string {
     .replace(/[š]/g, "s")
     .replace(/[ž]/g, "z")
     .replace(/[đ]/g, "dj")
+    // 10gr / 10 gr → 10g so tokens and volume parsing stay aligned
+    .replace(/(\d+[.,]?\d*)\s*gr\.?\b/g, "$1g")
     .replace(/[^a-z0-9]/g, " ")
+    .replace(/\s+/g, " ")
+    // light Serbian morphology for matching (zrnu ≈ zrno)
+    .replace(/\bzrnu\b/g, "zrno")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -71,33 +76,40 @@ export function tokenSimilarity(a: string, b: string): number {
 }
 
 export function extractVolumesNormalized(text: string): number[] {
-  const regex = /(\d+[.,]?\d*)\s*(l|ml|kg|g|lit|cl)\b/gi;
+  // Longer units first so "10gr" is not parsed as "10g" + leftover "r".
+  const regex = /(\d+[.,]?\d*)\s*(kg|ml|lit|cl|gr|g|l)\b/gi;
   const matches = [...text.matchAll(regex)];
   const results: number[] = [];
 
   for (const m of matches) {
-    let amount = parseFloat(m[1].replace(",", "."));
+    const amount = parseFloat(m[1].replace(",", "."));
     const unit = m[2].toLowerCase();
     if (Number.isNaN(amount)) continue;
     if (unit === "ml" || unit === "cl") results.push(amount / 1000);
     else if (unit === "l" || unit === "lit") results.push(amount);
-    else if (unit === "g") results.push(amount / 1000);
+    else if (unit === "g" || unit === "gr") results.push(amount / 1000);
     else if (unit === "kg") results.push(amount);
   }
 
   return results;
 }
 
+/**
+ * Relative volume similarity. Absolute liter/kg diffs are too small for grams
+ * (10g vs 20g = 0.01 → almost no penalty with the old exp(-diff*3)).
+ */
 export function getBestVolumeScore(a: number[], b: number[]): number {
   if (!a.length || !b.length) return 0.5;
-  let bestDiff = Infinity;
+  let best = 0;
   for (const v1 of a) {
     for (const v2 of b) {
-      const diff = Math.abs(v1 - v2);
-      if (diff < bestDiff) bestDiff = diff;
+      const denom = Math.max(v1, v2, 1e-9);
+      const relative = Math.abs(v1 - v2) / denom;
+      const score = Math.exp(-relative * 4);
+      if (score > best) best = score;
     }
   }
-  return Math.exp(-bestDiff * 3);
+  return best;
 }
 
 export function categoryAlignmentScore(
@@ -126,14 +138,31 @@ export const MIN_MATCH_SCORE = 0.48;
 /** Minimum score for a weak / best-effort suggestion when nothing passes MIN_MATCH_SCORE. */
 export const MIN_WEAK_MATCH_SCORE = 0.32;
 
+/** Short / alias brand forms that should count as the same brand (e.g. C ≈ CP). */
+const BRAND_EQUIVALENTS: Record<string, string[]> = {
+  c: ["c", "cp"],
+  cp: ["c", "cp"],
+};
+
+function brandMatchVariants(normalizedBrand: string): string[] {
+  return BRAND_EQUIVALENTS[normalizedBrand] ?? [normalizedBrand];
+}
+
 export function brandMatchScore(
   scrapedName: string,
   brand: string | null | undefined,
 ): number {
   const normalizedScraped = normalizeText(scrapedName);
   const normalizedBrand = brand ? normalizeText(brand) : "";
-  if (normalizedBrand.length < 3) return 0;
-  if (normalizedScraped.includes(normalizedBrand)) return 1;
+  if (!normalizedBrand) return 0;
+
+  const scrapedTokens = new Set(tokenize(scrapedName));
+  for (const variant of brandMatchVariants(normalizedBrand)) {
+    if (!variant) continue;
+    // Whole-token match (needed for short brands like "C" / "CP").
+    if (scrapedTokens.has(variant)) return 1;
+    if (variant.length >= 3 && normalizedScraped.includes(variant)) return 1;
+  }
 
   const brandTokens = significantTokens(brand ?? "");
   if (!brandTokens.length) return 0;
@@ -201,8 +230,16 @@ export function computeMatchScore(
   const fuzzyScore = Math.max(fuzzyCombined, fuzzyNameOnly);
 
   const scrapedVolumes = extractVolumesNormalized(input.scrapedName);
-  const spVolumes = extractVolumesNormalized(input.standardizedVolume ?? "");
+  const spVolumes = extractVolumesNormalized(
+    `${input.standardizedVolume ?? ""} ${input.standardizedName}`,
+  );
   const volumeScore = getBestVolumeScore(scrapedVolumes, spVolumes);
+  const bothVolumesKnown = scrapedVolumes.length > 0 && spVolumes.length > 0;
+
+  // Hard reject clear quantity mismatches (e.g. 10g vs 20g) once both sides parse.
+  if (bothVolumesKnown && volumeScore < 0.4) {
+    return null;
+  }
 
   const brandMatch = brandMatchScore(input.scrapedName, input.standardizedBrand);
 
@@ -215,10 +252,12 @@ export function computeMatchScore(
     return null;
   }
 
+  const volumeWeight = bothVolumesKnown ? 0.28 : 0.12;
+  const nameWeight = bothVolumesKnown ? 0.37 : 0.53;
   const finalScore =
-    Math.max(similarity, fuzzyScore * 0.95) * 0.5 +
+    Math.max(similarity, fuzzyScore * 0.95) * nameWeight +
     fuzzyScore * 0.15 +
-    volumeScore * 0.15 +
+    volumeScore * volumeWeight +
     brandMatch * 0.1 +
     categoryScore * 0.1;
 
