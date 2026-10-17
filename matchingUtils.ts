@@ -201,6 +201,21 @@ function escapeRegexLiteral(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+/** True when Product.name has matchName as a whole token (e.g. "Carn" in "Carn pašteta 150g"). */
+export function scrapedNameHasBrandAliasToken(
+  scrapedName: string,
+  matchName: string,
+): boolean {
+  const matchNorm = normalizeText(matchName);
+  if (!matchNorm) return false;
+  const norm = normalizeText(scrapedName);
+  if (!norm) return false;
+  const pattern = new RegExp(
+    `(?:^|\\s)${escapeRegexLiteral(matchNorm)}(?=\\s|$)`,
+  );
+  return pattern.test(norm);
+}
+
 /**
  * Rewrite Product-name brand aliases to the canonical StandardizedProduct.brand
  * so similarity / fuzzy / brand scoring can align (e.g. "Podr Vegeta" → "podravka vegeta").

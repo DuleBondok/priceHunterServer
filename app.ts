@@ -1167,6 +1167,9 @@ app.get("/matches", async (req, res) => {
       req.query.productCategory,
     );
     const store = parseOptionalCategoryQuery(req.query.store);
+    const brandAliasMatch = parseOptionalCategoryQuery(
+      req.query.brandAliasMatch,
+    );
 
     if (!standardizedMainCategory && !productCategory && !store) {
       res.status(400).json({ error: "Select a category or store first" });
@@ -1178,9 +1181,10 @@ app.get("/matches", async (req, res) => {
       standardizedMainCategory,
       productCategory,
       store,
+      brandAliasMatch,
     });
     console.log(
-      `[matches] done in ${Date.now() - started}ms rows=${result.matches.length} eligible=${result.eligible}`,
+      `[matches] done in ${Date.now() - started}ms rows=${result.matches.length} eligible=${result.eligible} alias=${brandAliasMatch || "-"}`,
     );
     res.json(result);
   } catch (error) {

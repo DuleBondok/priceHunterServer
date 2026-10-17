@@ -12,6 +12,7 @@ import {
   MIN_WEAK_MATCH_SCORE,
   normalizeText,
   scoreProductMatch,
+  scrapedNameHasBrandAliasToken,
   type BrandAliasIndex,
 } from "./matchingUtils";
 import { compareTwoStrings } from "string-similarity";
@@ -28,6 +29,12 @@ export type ProductMatchesFilters = {
   standardizedMainCategory?: string;
   productCategory?: string;
   store?: string;
+  /**
+   * SimilarityBrandAlias.matchName (e.g. "Carn").
+   * When set: only Products whose name contains that token, matched against
+   * StandardizedProducts with brand = alias canonical name (e.g. Carnex).
+   */
+  brandAliasMatch?: string;
   limit?: number;
 };
 
@@ -103,6 +110,7 @@ function distinctSorted(values: string[]): string[] {
 
 async function loadStandardsForMatching(
   standardizedMainCategory?: string,
+  standardizedBrand?: string,
 ): Promise<{
   standards: StandardForMatch[];
   standardsById: Map<number, StandardForMatch>;
@@ -121,6 +129,12 @@ async function loadStandardsForMatching(
       standardsById: new Map(),
       allStandardIds: [],
       tokenIndex: buildStandardizedTokenIndex([]),
+    };
+  }
+  if (standardizedBrand?.trim()) {
+    spWhere.brand = {
+      equals: standardizedBrand.trim(),
+      mode: Prisma.QueryMode.insensitive,
     };
   }
 
@@ -503,17 +517,29 @@ async function matchScrapedRows(
     };
   }
 
-  const [{ standardsById, tokenIndex }, similarityAliases] = await Promise.all([
-    loadStandardsForMatching(filters.standardizedMainCategory),
-    prisma.similarityBrandAlias.findMany({
-      select: { name: true, matchName: true },
-    }),
-  ]);
+  const similarityAliases = await prisma.similarityBrandAlias.findMany({
+    select: { name: true, matchName: true },
+  });
   const brandAliases = buildBrandAliasIndex(similarityAliases);
+
+  const aliasMatchRaw = filters.brandAliasMatch?.trim() || "";
+  let aliasCanonicalBrand: string | undefined;
+  if (aliasMatchRaw) {
+    const aliasNorm = normalizeText(aliasMatchRaw);
+    const row = similarityAliases.find(
+      (a) => normalizeText(a.matchName) === aliasNorm,
+    );
+    aliasCanonicalBrand = row?.name?.trim() || undefined;
+  }
+
+  const { standardsById, tokenIndex } = await loadStandardsForMatching(
+    filters.standardizedMainCategory,
+    aliasCanonicalBrand,
+  );
   const remainingIds = [...standardsById.keys()];
 
   console.log(
-    `[${logLabel}] sp=${filters.standardizedMainCategory ?? ""} cat=${filters.productCategory ?? ""} store=${filters.store ?? ""} unmatched=${unmatchedProducts.length}/${eligible} standards=${remainingIds.length} brandAliases=${brandAliases.entries.length} rss=${Math.round(process.memoryUsage().rss / 1024 / 1024)}MB`,
+    `[${logLabel}] sp=${filters.standardizedMainCategory ?? ""} cat=${filters.productCategory ?? ""} store=${filters.store ?? ""} alias=${aliasMatchRaw || "-"}→${aliasCanonicalBrand || "-"} unmatched=${unmatchedProducts.length}/${eligible} standards=${remainingIds.length} brandAliases=${brandAliases.entries.length} rss=${Math.round(process.memoryUsage().rss / 1024 / 1024)}MB`,
   );
 
   const result = buildMatchesForScrapedRows(
@@ -564,11 +590,23 @@ export async function getProductMatches(
     };
   }
 
+  const aliasMatchRaw = filters.brandAliasMatch?.trim() || "";
+  if (aliasMatchRaw) {
+    productWhere.name = {
+      contains: aliasMatchRaw,
+      mode: Prisma.QueryMode.insensitive,
+    };
+  }
+
+  const poolTake = aliasMatchRaw
+    ? Math.min(MATCHES_PAGE_LIMIT, Math.max(poolSizeForLimit(limit), 2000))
+    : poolSizeForLimit(limit);
+
   const eligible = await prisma.product.count({ where: productWhere });
-  const unmatchedProducts = await prisma.product.findMany({
+  let unmatchedProducts = await prisma.product.findMany({
     where: productWhere,
     orderBy: { id: "asc" },
-    take: poolSizeForLimit(limit),
+    take: poolTake,
     select: {
       id: true,
       name: true,
@@ -579,11 +617,18 @@ export async function getProductMatches(
     },
   });
 
+  // Whole-token filter (contains "Carn" must not keep "Carnival").
+  if (aliasMatchRaw) {
+    unmatchedProducts = unmatchedProducts.filter((p) =>
+      scrapedNameHasBrandAliasToken(p.name, aliasMatchRaw),
+    );
+  }
+
   return matchScrapedRows(
     unmatchedProducts,
     filters,
     limit,
-    eligible,
+    aliasMatchRaw ? unmatchedProducts.length : eligible,
     "matches",
   );
 }
