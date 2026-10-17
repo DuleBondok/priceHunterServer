@@ -13,6 +13,7 @@ import {
   normalizeText,
   scoreProductMatch,
   scrapedNameHasBrandAliasToken,
+  SCRAPED_CATEGORY_TO_STANDARDIZED_MAIN,
   type BrandAliasIndex,
 } from "./matchingUtils";
 import { compareTwoStrings } from "string-similarity";
@@ -108,9 +109,30 @@ function distinctSorted(values: string[]): string[] {
   );
 }
 
+/** Product.category → Cenoteka mainCategory labels (case-insensitive key match). */
+function mappedMainCategoriesForProductCategory(
+  productCategory?: string,
+): string[] {
+  const raw = productCategory?.trim();
+  if (!raw) return [];
+  const direct = SCRAPED_CATEGORY_TO_STANDARDIZED_MAIN[raw];
+  if (direct?.length) return direct;
+  const key = Object.keys(SCRAPED_CATEGORY_TO_STANDARDIZED_MAIN).find(
+    (k) => k.toLowerCase() === raw.toLowerCase(),
+  );
+  return key ? SCRAPED_CATEGORY_TO_STANDARDIZED_MAIN[key] ?? [] : [];
+}
+
+/**
+ * Load SP candidates for matching.
+ * - Explicit SP mainCategory filter, or
+ * - When "All main categories" + Product category: map scraped category → SP mains
+ *   (otherwise standards stay empty and every row becomes "No suggestion found").
+ */
 async function loadStandardsForMatching(
   standardizedMainCategory?: string,
   standardizedBrand?: string,
+  productCategory?: string,
 ): Promise<{
   standards: StandardForMatch[];
   standardsById: Map<number, StandardForMatch>;
@@ -118,19 +140,32 @@ async function loadStandardsForMatching(
   tokenIndex: ReturnType<typeof buildStandardizedTokenIndex>;
 }> {
   const spWhere: Prisma.StandardizedProductWhereInput = {};
-  if (standardizedMainCategory?.trim()) {
+  const explicitMain = standardizedMainCategory?.trim() || "";
+
+  if (explicitMain) {
     spWhere.mainCategory = {
-      equals: standardizedMainCategory.trim(),
+      equals: explicitMain,
       mode: Prisma.QueryMode.insensitive,
     };
   } else {
-    return {
-      standards: [],
-      standardsById: new Map(),
-      allStandardIds: [],
-      tokenIndex: buildStandardizedTokenIndex([]),
-    };
+    const mapped = mappedMainCategoriesForProductCategory(productCategory);
+    if (!mapped.length) {
+      return {
+        standards: [],
+        standardsById: new Map(),
+        allStandardIds: [],
+        tokenIndex: buildStandardizedTokenIndex([]),
+      };
+    }
+    // Avoid loading the entire SP table (OOM on Render). Scope via scraped→SP map.
+    spWhere.OR = mapped.map((main) => ({
+      mainCategory: {
+        equals: main,
+        mode: Prisma.QueryMode.insensitive,
+      },
+    }));
   }
+
   if (standardizedBrand?.trim()) {
     spWhere.brand = {
       equals: standardizedBrand.trim(),
@@ -535,11 +570,22 @@ async function matchScrapedRows(
   const { standardsById, tokenIndex } = await loadStandardsForMatching(
     filters.standardizedMainCategory,
     aliasCanonicalBrand,
+    filters.productCategory,
   );
   const remainingIds = [...standardsById.keys()];
 
+  if (
+    !filters.standardizedMainCategory?.trim() &&
+    filters.productCategory?.trim() &&
+    remainingIds.length === 0
+  ) {
+    console.warn(
+      `[${logLabel}] All SP mains + productCategory="${filters.productCategory}" mapped to 0 standards — check SCRAPED_CATEGORY_TO_STANDARDIZED_MAIN`,
+    );
+  }
+
   console.log(
-    `[${logLabel}] sp=${filters.standardizedMainCategory ?? ""} cat=${filters.productCategory ?? ""} store=${filters.store ?? ""} alias=${aliasMatchRaw || "-"}→${aliasCanonicalBrand || "-"} unmatched=${unmatchedProducts.length}/${eligible} standards=${remainingIds.length} brandAliases=${brandAliases.entries.length} rss=${Math.round(process.memoryUsage().rss / 1024 / 1024)}MB`,
+    `[${logLabel}] sp=${filters.standardizedMainCategory ?? "(all→map)"} cat=${filters.productCategory ?? ""} store=${filters.store ?? ""} alias=${aliasMatchRaw || "-"}→${aliasCanonicalBrand || "-"} unmatched=${unmatchedProducts.length}/${eligible} standards=${remainingIds.length} brandAliases=${brandAliases.entries.length} rss=${Math.round(process.memoryUsage().rss / 1024 / 1024)}MB`,
   );
 
   const result = buildMatchesForScrapedRows(
