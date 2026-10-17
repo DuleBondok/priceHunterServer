@@ -332,6 +332,25 @@ model CatalogBrand {
   createdAt DateTime @default(now())
 }
 
+/// Brand aliases for Similarity matches only (independent of CatalogBrand / Brand promote).
+/// Product.name contains matchName → treat as StandardizedProduct.brand = name.
+model SimilarityBrandAlias {
+  id        Int      @id @default(autoincrement())
+  /// Canonical StandardizedProduct.brand (e.g. "Podravka").
+  name      String
+  /// Token/phrase in Product.name (e.g. "Podr").
+  matchName String   @unique
+  createdAt DateTime @default(now())
+}
+
+/// Daily catalog-home shelves (written after 05:00 scrape). Pricely API reads this row.
+model HomeShelfSnapshot {
+  id         String   @id
+  computedAt DateTime
+  payload    Json
+  updatedAt  DateTime @updatedAt
+}
+
 /// Permanently excluded listings. Scrape will not recreate Product/NewProducts for this key.
 /// Price of a chain listing in one physical object, for chains that price per object.
 /// Linked to Product / NewProducts by (normalizedName, store); replaced on every full scrape.

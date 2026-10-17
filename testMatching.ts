@@ -1,8 +1,10 @@
 import { Prisma } from "@prisma/client";
 import prisma from "./prismaClient";
 import {
+  buildBrandAliasIndex,
   buildStandardizedTokenIndex,
   computeMatchScore,
+  expandScrapedNameWithBrandAliases,
   extractVolumesNormalized,
   getBestVolumeScore,
   linkedStoreCount,
@@ -10,6 +12,7 @@ import {
   MIN_WEAK_MATCH_SCORE,
   normalizeText,
   scoreProductMatch,
+  type BrandAliasIndex,
 } from "./matchingUtils";
 import { compareTwoStrings } from "string-similarity";
 
@@ -213,9 +216,14 @@ function pickCandidateIds(
   allStandardIds: number[],
   spNormById: Map<number, string>,
   spVolsById: Map<number, number[]>,
+  brandAliases?: BrandAliasIndex | null,
 ): number[] {
   if (!allStandardIds.length) return [];
-  const scrapedNorm = normalizeText(scrapedName);
+  const scrapedForMatch = expandScrapedNameWithBrandAliases(
+    scrapedName,
+    brandAliases,
+  );
+  const scrapedNorm = normalizeText(scrapedForMatch);
   const scrapedVols = extractVolumesNormalized(scrapedName);
   return allStandardIds
     .map((id) => {
@@ -241,10 +249,12 @@ function buildMatchesForScrapedRows(
   allStandardIds: number[],
   _tokenIndex: ReturnType<typeof buildStandardizedTokenIndex>,
   limit: number,
+  brandAliases?: BrandAliasIndex | null,
 ): ProductMatchesResult {
   const matches: ProductMatchRow[] = [];
   const spNormById = buildSpNormById(standardsById);
   const spVolsById = buildSpVolsById(standardsById);
+  const scoreOpts = { brandAliases: brandAliases ?? null };
 
   for (const scraped of unmatchedProducts) {
     const candidateIds = pickCandidateIds(
@@ -252,6 +262,7 @@ function buildMatchesForScrapedRows(
       allStandardIds,
       spNormById,
       spVolsById,
+      brandAliases,
     );
 
     let bestSp: StandardForMatch | null = null;
@@ -266,14 +277,17 @@ function buildMatchesForScrapedRows(
       if (!sp) continue;
       if (sp.products.some((p) => p.store === scraped.store)) continue;
 
-      const scored = scoreProductMatch({
-        scrapedName: scraped.name,
-        scrapedCategory: scraped.category,
-        standardizedBrand: sp.brand,
-        standardizedName: sp.name,
-        standardizedVolume: sp.volume,
-        standardizedMainCategory: sp.mainCategory,
-      });
+      const scored = scoreProductMatch(
+        {
+          scrapedName: scraped.name,
+          scrapedCategory: scraped.category,
+          standardizedBrand: sp.brand,
+          standardizedName: sp.name,
+          standardizedVolume: sp.volume,
+          standardizedMainCategory: sp.mainCategory,
+        },
+        scoreOpts,
+      );
 
       if (
         scored &&
@@ -299,7 +313,11 @@ function buildMatchesForScrapedRows(
             standardizedVolume: sp.volume,
             standardizedMainCategory: sp.mainCategory,
           },
-          { relaxed: true, minScore: MIN_WEAK_MATCH_SCORE },
+          {
+            relaxed: true,
+            minScore: MIN_WEAK_MATCH_SCORE,
+            brandAliases: brandAliases ?? null,
+          },
         );
 
         if (weak && (!weakScored || weak.finalScore > weakScored.finalScore)) {
@@ -485,13 +503,17 @@ async function matchScrapedRows(
     };
   }
 
-  const { standardsById, tokenIndex } = await loadStandardsForMatching(
-    filters.standardizedMainCategory,
-  );
+  const [{ standardsById, tokenIndex }, similarityAliases] = await Promise.all([
+    loadStandardsForMatching(filters.standardizedMainCategory),
+    prisma.similarityBrandAlias.findMany({
+      select: { name: true, matchName: true },
+    }),
+  ]);
+  const brandAliases = buildBrandAliasIndex(similarityAliases);
   const remainingIds = [...standardsById.keys()];
 
   console.log(
-    `[${logLabel}] sp=${filters.standardizedMainCategory ?? ""} cat=${filters.productCategory ?? ""} store=${filters.store ?? ""} unmatched=${unmatchedProducts.length}/${eligible} standards=${remainingIds.length} rss=${Math.round(process.memoryUsage().rss / 1024 / 1024)}MB`,
+    `[${logLabel}] sp=${filters.standardizedMainCategory ?? ""} cat=${filters.productCategory ?? ""} store=${filters.store ?? ""} unmatched=${unmatchedProducts.length}/${eligible} standards=${remainingIds.length} brandAliases=${brandAliases.entries.length} rss=${Math.round(process.memoryUsage().rss / 1024 / 1024)}MB`,
   );
 
   const result = buildMatchesForScrapedRows(
@@ -501,6 +523,7 @@ async function matchScrapedRows(
     remainingIds,
     tokenIndex,
     limit,
+    brandAliases,
   );
   result.eligible = eligible;
   result.total = eligible;

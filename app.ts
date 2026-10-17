@@ -27,6 +27,11 @@ import {
   previewBrandPromote,
 } from "./brandPromote";
 import {
+  addSimilarityBrandAlias,
+  deleteSimilarityBrandAlias,
+  listSimilarityBrandAliases,
+} from "./similarityBrandAlias";
+import {
   blockListings,
   getBlockedProductsMeta,
   listBlockedProducts,
@@ -50,6 +55,7 @@ import {
   initScrapeSchedule,
   runAllCompleteScrapers,
 } from "./scrapeOrchestrator";
+import { getHomeShelvesForServe } from "./homeShelves";
 import {
   assertAdminAuthConfigured,
   requireAdmin,
@@ -1095,13 +1101,59 @@ function parseIdList(value: unknown): number[] {
 app.get("/matches/meta", async (_req, res) => {
   try {
     console.log("[matches/meta] start");
-    const meta = await getMatchCategoryMeta();
+    const [meta, brandAliases] = await Promise.all([
+      getMatchCategoryMeta(),
+      listSimilarityBrandAliases(),
+    ]);
     console.log(
-      `[matches/meta] ok sp=${meta.standardizedMainCategories.length} cat=${meta.productCategories.length} store=${meta.stores.length}`,
+      `[matches/meta] ok sp=${meta.standardizedMainCategories.length} cat=${meta.productCategories.length} store=${meta.stores.length} brandAliases=${brandAliases.length}`,
     );
-    res.json(meta);
+    res.json({ ...meta, brandAliases });
   } catch (error) {
     console.error("Error getting match category meta:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+app.get("/matches/brand-aliases", async (_req, res) => {
+  try {
+    const brandAliases = await listSimilarityBrandAliases();
+    res.json({ brandAliases });
+  } catch (error) {
+    console.error("matches/brand-aliases:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+app.post("/matches/brand-aliases", async (req, res) => {
+  try {
+    const matchName =
+      typeof req.body?.matchName === "string" ? req.body.matchName : "";
+    const name = typeof req.body?.name === "string" ? req.body.name : "";
+    const brand = await addSimilarityBrandAlias(matchName, name);
+    res.status(201).json(brand);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Bad request";
+    const status =
+      message.includes("required") || message.includes("already exists")
+        ? 400
+        : 500;
+    if (status === 500) console.error("matches/brand-aliases create:", error);
+    res.status(status).json({ error: message });
+  }
+});
+
+app.delete("/matches/brand-aliases/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) {
+      res.status(400).json({ error: "Invalid id" });
+      return;
+    }
+    await deleteSimilarityBrandAlias(id);
+    res.json({ ok: true });
+  } catch (error) {
+    console.error("matches/brand-aliases delete:", error);
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
@@ -1156,8 +1208,11 @@ app.post('/confirm-match', async (req, res) => {
 
 app.get("/new-product-matches/meta", async (_req, res) => {
   try {
-    const meta = await getNewProductMatchCategoryMeta();
-    res.json(meta);
+    const [meta, brandAliases] = await Promise.all([
+      getNewProductMatchCategoryMeta(),
+      listSimilarityBrandAliases(),
+    ]);
+    res.json({ ...meta, brandAliases });
   } catch (error) {
     console.error("Error getting new product match category meta:", error);
     res.status(500).json({ error: "Internal Server Error" });
@@ -1655,10 +1710,31 @@ app.get(
 
 app.use('/api/search', searchRoute);
 
+/**
+ * Catalog-home shelves for the mobile app (Popular / Najveća ušteda / Najveći popusti).
+ * Public read of Neon `HomeShelfSnapshot` — written after the 05:00 scrape.
+ * Local Metro proxy (`/pricely-api` → :5000) hits this when priceHunterBackend is running.
+ */
+app.get("/api/home-shelves", async (_req: Request, res: Response) => {
+  try {
+    const snap = await getHomeShelvesForServe(prisma);
+    res.setHeader("Cache-Control", "public, max-age=60");
+    res.json(snap);
+  } catch (err) {
+    console.error(
+      "[HOME_SHELVES] GET /api/home-shelves failed:",
+      err instanceof Error ? err.message : err,
+    );
+    res.status(500).json({
+      message: err instanceof Error ? err.message : "Server error",
+    });
+  }
+});
 
 const PORT = Number(process.env.PORT) || 5000;
 app.listen(PORT, () => {
   console.log(`Server running on Port ${PORT}`);
+  console.log(`  GET /api/home-shelves  (Neon HomeShelfSnapshot)`);
   void ensureReceiptRewardsCatalog(prisma).catch((err: unknown) => {
     const msg = err instanceof Error ? err.message : String(err);
     console.warn(`[receipt-rewards] catalog seed skipped: ${msg}`);

@@ -148,9 +148,88 @@ function brandMatchVariants(normalizedBrand: string): string[] {
   return BRAND_EQUIVALENTS[normalizedBrand] ?? [normalizedBrand];
 }
 
+/**
+ * SimilarityBrandAlias rows (Similarity matches only — not Brand promote).
+ * matchName appears in Product.name, name is StandardizedProduct.brand.
+ * Example: matchName "Podr" → name "Podravka".
+ */
+export type BrandAliasRow = {
+  matchName: string;
+  name: string;
+};
+
+export type BrandAliasIndex = {
+  /** Longest matchName first — used to rewrite scraped names. */
+  entries: Array<{ matchNorm: string; canonicalNorm: string; canonicalRaw: string }>;
+  /** normalized canonical brand → normalized Product-name aliases */
+  canonicalToMatches: Map<string, string[]>;
+};
+
+export function buildBrandAliasIndex(
+  rows: Array<BrandAliasRow | { matchName: string; name: string }>,
+): BrandAliasIndex {
+  const canonicalToMatches = new Map<string, string[]>();
+  const entries: BrandAliasIndex["entries"] = [];
+
+  for (const row of rows || []) {
+    const matchRaw = String(row.matchName || "").trim().replace(/\s+/g, " ");
+    const canonicalRaw = String(row.name || "").trim().replace(/\s+/g, " ");
+    if (!matchRaw || !canonicalRaw) continue;
+    const matchNorm = normalizeText(matchRaw);
+    const canonicalNorm = normalizeText(canonicalRaw);
+    if (!matchNorm || !canonicalNorm) continue;
+
+    entries.push({ matchNorm, canonicalNorm, canonicalRaw });
+    const list = canonicalToMatches.get(canonicalNorm) ?? [];
+    if (!list.includes(matchNorm)) list.push(matchNorm);
+    canonicalToMatches.set(canonicalNorm, list);
+
+    // Also index hard-coded equivalents of the canonical brand.
+    for (const variant of brandMatchVariants(canonicalNorm)) {
+      if (variant === canonicalNorm) continue;
+      const alt = canonicalToMatches.get(variant) ?? [];
+      if (!alt.includes(matchNorm)) alt.push(matchNorm);
+      canonicalToMatches.set(variant, alt);
+    }
+  }
+
+  entries.sort((a, b) => b.matchNorm.length - a.matchNorm.length);
+  return { entries, canonicalToMatches };
+}
+
+function escapeRegexLiteral(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Rewrite Product-name brand aliases to the canonical StandardizedProduct.brand
+ * so similarity / fuzzy / brand scoring can align (e.g. "Podr Vegeta" → "podravka vegeta").
+ * Returns normalized text (safe to feed back into computeMatchScore).
+ */
+export function expandScrapedNameWithBrandAliases(
+  scrapedName: string,
+  aliasIndex?: BrandAliasIndex | null,
+): string {
+  if (!aliasIndex?.entries.length) return scrapedName;
+  let norm = normalizeText(scrapedName);
+  if (!norm) return scrapedName;
+
+  for (const entry of aliasIndex.entries) {
+    const token = escapeRegexLiteral(entry.matchNorm);
+    const pattern = new RegExp(`(?:^|\\s)${token}(?=\\s|$)`);
+    if (!pattern.test(norm)) continue;
+    norm = norm
+      .replace(pattern, ` ${entry.canonicalNorm} `)
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+  return norm;
+}
+
 export function brandMatchScore(
   scrapedName: string,
   brand: string | null | undefined,
+  aliasIndex?: BrandAliasIndex | null,
 ): number {
   const normalizedScraped = normalizeText(scrapedName);
   const normalizedBrand = brand ? normalizeText(brand) : "";
@@ -162,6 +241,19 @@ export function brandMatchScore(
     // Whole-token match (needed for short brands like "C" / "CP").
     if (scrapedTokens.has(variant)) return 1;
     if (variant.length >= 3 && normalizedScraped.includes(variant)) return 1;
+  }
+
+  // Similarity brand aliases: Product has "Podr", SP.brand is "Podravka".
+  if (aliasIndex) {
+    const aliases = aliasIndex.canonicalToMatches.get(normalizedBrand) ?? [];
+    for (const alias of aliases) {
+      if (!alias) continue;
+      if (scrapedTokens.has(alias)) return 1;
+      if (alias.length >= 2) {
+        const aliasPattern = new RegExp(`(?:^|\\s)${escapeRegexLiteral(alias)}(?=\\s|$)`);
+        if (aliasPattern.test(normalizedScraped)) return 1;
+      }
+    }
   }
 
   const brandTokens = significantTokens(brand ?? "");
@@ -192,6 +284,8 @@ export type MatchScoreOptions = {
   relaxed?: boolean;
   /** Return null when finalScore is below this (default MIN_MATCH_SCORE). */
   minScore?: number;
+  /** SimilarityBrandAlias map (Product name token → StandardizedProduct.brand). */
+  brandAliases?: BrandAliasIndex | null;
 };
 
 export function computeMatchScore(
@@ -200,15 +294,22 @@ export function computeMatchScore(
 ): MatchScoreResult | null {
   const minScore = options.minScore ?? MIN_MATCH_SCORE;
   const relaxed = options.relaxed ?? false;
+  const brandAliases = options.brandAliases ?? null;
 
-  const normalizedScraped = normalizeText(input.scrapedName);
+  // Expand Product-name brand aliases before scoring (Podr → Podravka).
+  const scrapedForMatch = expandScrapedNameWithBrandAliases(
+    input.scrapedName,
+    brandAliases,
+  );
+
+  const normalizedScraped = normalizeText(scrapedForMatch);
   const normalizedSpName = normalizeText(input.standardizedName);
   const normalizedCombined = normalizeText(
     `${input.standardizedBrand ?? ""} ${input.standardizedName}`,
   );
 
   if (!relaxed) {
-    const sigScraped = significantTokens(input.scrapedName);
+    const sigScraped = significantTokens(scrapedForMatch);
     const sigCombined = significantTokens(normalizedCombined);
     const sigOverlap = sigScraped.filter((t) => sigCombined.includes(t));
 
@@ -241,7 +342,11 @@ export function computeMatchScore(
     return null;
   }
 
-  const brandMatch = brandMatchScore(input.scrapedName, input.standardizedBrand);
+  const brandMatch = brandMatchScore(
+    input.scrapedName,
+    input.standardizedBrand,
+    brandAliases,
+  );
 
   const categoryScore = categoryAlignmentScore(
     input.scrapedCategory,
@@ -279,8 +384,11 @@ export function computeMatchScore(
   };
 }
 
-export function scoreProductMatch(input: MatchScoreInput): MatchScoreResult | null {
-  return computeMatchScore(input);
+export function scoreProductMatch(
+  input: MatchScoreInput,
+  options: MatchScoreOptions = {},
+): MatchScoreResult | null {
+  return computeMatchScore(input, options);
 }
 
 /** Stable tokens for inverted index: words plus normalized volume (vol180 for 180g). */
