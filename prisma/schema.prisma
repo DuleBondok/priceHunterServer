@@ -28,11 +28,23 @@ model Product {
   updatedAt             DateTime             @updatedAt
   standardizedProductId Int?
   standardizedProduct   StandardizedProduct? @relation(fields: [standardizedProductId], references: [id])
+  barcodes              ProductBarcode[]
 
   @@unique([normalizedName, store], name: "normalizedName_store")
   @@index([lastSeenAt])
   @@index([isAvailable])
   @@index([flaggedForReview])
+}
+
+/// One or more EAN/barcodes per Product (Idea/AS often expose several per SKU).
+model ProductBarcode {
+  id        Int     @id @default(autoincrement())
+  productId Int
+  barcode   String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, barcode])
+  @@index([barcode])
 }
 
 /// Scraped products not yet promoted to Product (pending review).

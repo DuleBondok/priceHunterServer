@@ -25,7 +25,36 @@ export type ProductData = {
   category: string;
   requiresLoyaltyCard?: boolean;
   offerEndsOn?: string | null;
+  /** EAN/barcodes from the store API (Idea/AS may send several per SKU). */
+  barcodes?: string[];
 };
+
+/** Normalize and dedupe barcode strings (digits only, EAN-8…14). */
+export function normalizeProductBarcodes(
+  raw: Array<string | null | undefined> | null | undefined,
+): string[] {
+  if (!raw?.length) return [];
+  const out = new Set<string>();
+  for (const item of raw) {
+    if (item == null) continue;
+    const digits = String(item).replace(/\D/g, "");
+    if (digits.length >= 8 && digits.length <= 14) out.add(digits);
+  }
+  return [...out];
+}
+
+export async function syncProductBarcodes(
+  productId: number,
+  barcodes: string[],
+): Promise<number> {
+  const cleaned = normalizeProductBarcodes(barcodes);
+  if (!cleaned.length) return 0;
+  const result = await prisma.productBarcode.createMany({
+    data: cleaned.map((barcode) => ({ productId, barcode })),
+    skipDuplicates: true,
+  });
+  return result.count;
+}
 
 export type SaveProductsOptions = {
   /**
@@ -493,6 +522,7 @@ export async function saveProducts(
     offerEndsOn: string | null;
     rename?: { name: string; normalizedName: string };
   }[] = [];
+  const barcodeSyncOps: Array<{ productId: number; barcodes: string[] }> = [];
   const seenByStore = new Map<string, Set<string>>();
   const seenAt = now();
 
@@ -580,6 +610,9 @@ export async function saveProducts(
         offerEndsOn: p.offerEndsOn ?? null,
         rename,
       });
+      if (p.barcodes?.length) {
+        barcodeSyncOps.push({ productId: existing.id, barcodes: p.barcodes });
+      }
 
       updateCount++;
       continue;
@@ -735,6 +768,14 @@ export async function saveProducts(
       }),
     );
   });
+
+  if (barcodeSyncOps.length > 0) {
+    await runInBatches(barcodeSyncOps, PRISMA_WRITE_CONCURRENCY, async (batch) => {
+      await Promise.all(
+        batch.map((row) => syncProductBarcodes(row.productId, row.barcodes)),
+      );
+    });
+  }
 
   if (spIdsWithZeroPricedBefore.size > 0) {
     scheduleSitemapPingIfFirstPrices(spIdsWithZeroPricedBefore);
