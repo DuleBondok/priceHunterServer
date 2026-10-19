@@ -363,6 +363,22 @@ model HomeShelfSnapshot {
   updatedAt  DateTime @updatedAt
 }
 
+/// Complete-scraper run history (Neon — survives Render redeploys; replaces local scrape-runs.json).
+model ScrapeRunRecord {
+  id         String   @id
+  trigger    String
+  status     String
+  startedAt  DateTime
+  finishedAt DateTime?
+  durationMs Int?
+  /// Full ScrapeRun JSON (steps, logs, summary).
+  payload    Json
+  createdAt  DateTime @default(now())
+
+  @@index([startedAt])
+  @@index([status])
+}
+
 /// Permanently excluded listings. Scrape will not recreate Product/NewProducts for this key.
 /// Price of a chain listing in one physical object, for chains that price per object.
 /// Linked to Product / NewProducts by (normalizedName, store); replaced on every full scrape.

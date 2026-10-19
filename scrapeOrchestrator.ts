@@ -2,12 +2,21 @@ import { promises as fs } from "fs";
 import path from "path";
 import { spawn } from "child_process";
 import cron from "node-cron";
+import { Prisma } from "@prisma/client";
+import prisma from "./prismaClient";
 import { scraperProcessEnv } from "./scrapers/puppeteerEnv";
+import { refreshHomeShelvesAfterScrape } from "./homeShelves";
 
 type StepStatus = "success" | "failed";
 type RunStatus = "running" | "success" | "partial" | "failed";
 
-type ScrapeStore = "Idea" | "Maxi" | "DIS" | "Univerexport" | "Zlatan Trag";
+export type ScrapeStore =
+  | "Idea"
+  | "Maxi"
+  | "DIS"
+  | "Univerexport"
+  | "AS"
+  | "Zlatan Trag";
 
 export type ScrapeRunStep = {
   store: ScrapeStore;
@@ -43,18 +52,25 @@ export type ScrapeRun = {
   };
 };
 
-type RunsFile = {
-  runs: ScrapeRun[];
+export type ScrapeProblem = {
+  runId: string;
+  trigger: "manual" | "scheduled";
+  store: ScrapeStore;
+  status: StepStatus | RunStatus;
+  finishedAt?: string;
+  errorMessage: string;
 };
 
 /** Backend package root — avoids empty history when `app.ts` is started from a different cwd. */
 const BACKEND_ROOT = __dirname;
+/** Legacy local file — migrated once into Neon, then kept as optional backup. */
 const RUNS_FILE_PATH = path.join(BACKEND_ROOT, "data", "scrape-runs.json");
-const MAX_LOG_LINES_PER_STEP = 400;
+const MAX_LOG_LINES_PER_STEP = 250;
 const MAX_RUNS_TO_KEEP = 60;
 
 let isRunInProgress = false;
 let scheduledInitialized = false;
+let fileMigratedToDb = false;
 let activeRunLiveState: {
   runId: string;
   trigger: "manual" | "scheduled";
@@ -64,58 +80,106 @@ let activeRunLiveState: {
   currentStepStartedAt?: string;
   currentStepLogs: string[];
   completedSteps: ScrapeRunStep[];
+  plannedStores: ScrapeStore[];
 } | null = null;
 
-const SCRAPER_STEPS = [
+const SCRAPER_STEPS: Array<{
+  store: ScrapeStore;
+  command: string;
+  args: string[];
+}> = [
   {
-    store: "Idea" as const,
+    store: "Idea",
     command: "npx",
     args: ["ts-node", "runIdeaCompleteScrape.ts"],
   },
   {
-    store: "Maxi" as const,
+    store: "Maxi",
     command: "npx",
     args: ["ts-node", "scrapers/maxiCompleteScraper.ts"],
   },
   {
-    store: "DIS" as const,
+    store: "DIS",
     command: "npx",
     args: ["ts-node", "scrapers/disCompleteScraper.ts"],
   },
   {
-    store: "Univerexport" as const,
+    store: "Univerexport",
     command: "npx",
     args: ["ts-node", "scrapers/univerexportCompleteScraper.ts"],
   },
   {
-    store: "Zlatan Trag" as const,
+    store: "AS",
+    command: "npx",
+    args: ["ts-node", "scrapers/asCompleteScraper.ts"],
+  },
+  {
+    store: "Zlatan Trag",
     command: "npx",
     args: ["ts-node", "scrapers/zlatanTragCompleteScraper.ts"],
   },
 ];
 
-async function ensureRunsFile(): Promise<void> {
-  const dir = path.dirname(RUNS_FILE_PATH);
-  await fs.mkdir(dir, { recursive: true });
-  try {
-    await fs.access(RUNS_FILE_PATH);
-  } catch {
-    const initial: RunsFile = { runs: [] };
-    await fs.writeFile(RUNS_FILE_PATH, JSON.stringify(initial, null, 2), "utf-8");
+const STORE_ALIASES: Record<string, ScrapeStore> = {
+  idea: "Idea",
+  maxi: "Maxi",
+  dis: "DIS",
+  univerexport: "Univerexport",
+  as: "AS",
+  "zlatan trag": "Zlatan Trag",
+  zlatantrag: "Zlatan Trag",
+  zlatan: "Zlatan Trag",
+};
+
+export function listCompleteScraperStores(): Array<{
+  store: ScrapeStore;
+  command: string;
+}> {
+  return SCRAPER_STEPS.map((s) => ({
+    store: s.store,
+    command: [s.command, ...s.args].join(" "),
+  }));
+}
+
+export function resolveScrapeStores(
+  input?: string | string[] | null,
+): ScrapeStore[] {
+  if (input == null) return SCRAPER_STEPS.map((s) => s.store);
+  const raw = Array.isArray(input) ? input : [input];
+  const resolved: ScrapeStore[] = [];
+  for (const item of raw) {
+    const key = String(item || "")
+      .trim()
+      .toLowerCase();
+    if (!key) continue;
+    const store =
+      STORE_ALIASES[key] ||
+      (SCRAPER_STEPS.find((s) => s.store.toLowerCase() === key)?.store);
+    if (!store) {
+      throw new Error(
+        `Unknown store "${item}". Allowed: ${SCRAPER_STEPS.map((s) => s.store).join(", ")}`,
+      );
+    }
+    if (!resolved.includes(store)) resolved.push(store);
   }
+  if (resolved.length === 0) {
+    throw new Error("Provide at least one store");
+  }
+  return resolved;
 }
 
-async function readRuns(): Promise<ScrapeRun[]> {
-  await ensureRunsFile();
-  const raw = await fs.readFile(RUNS_FILE_PATH, "utf-8");
-  const parsed = JSON.parse(raw) as RunsFile;
-  return parsed.runs ?? [];
+function trimLogs(logs: string[]): string[] {
+  if (logs.length <= MAX_LOG_LINES_PER_STEP) return logs;
+  return logs.slice(logs.length - MAX_LOG_LINES_PER_STEP);
 }
 
-async function writeRuns(runs: ScrapeRun[]): Promise<void> {
-  await ensureRunsFile();
-  const trimmed = runs.slice(0, MAX_RUNS_TO_KEEP);
-  await fs.writeFile(RUNS_FILE_PATH, JSON.stringify({ runs: trimmed }, null, 2), "utf-8");
+function extractErrorFromLogs(logs: string[]): string | undefined {
+  const errorish = logs.filter((line) =>
+    /\b(error|failed|exception|fatal|econnreset|timeout|oom)\b/i.test(line),
+  );
+  if (errorish.length === 0) return undefined;
+  const last = errorish[errorish.length - 1];
+  return last.length > 400 ? `${last.slice(0, 397)}...` : last;
 }
 
 function runScraperStep(
@@ -150,11 +214,27 @@ function runScraperStep(
     child.stdout.on("data", addLog);
     child.stderr.on("data", addLog);
 
+    child.on("error", (err) => {
+      const finishedAtDate = new Date();
+      logs.push(`spawn error: ${err.message}`);
+      resolve({
+        store,
+        startedAt: startedAtDate.toISOString(),
+        finishedAt: finishedAtDate.toISOString(),
+        durationMs: finishedAtDate.getTime() - startedAtDate.getTime(),
+        status: "failed",
+        exitCode: -1,
+        command: [command, ...args].join(" "),
+        logs: trimLogs(logs),
+        errorMessage: err.message,
+      });
+    });
+
     child.on("close", (exitCodeRaw) => {
       const finishedAtDate = new Date();
       const exitCode = exitCodeRaw ?? -1;
-
       const finalInfo = extractFinalInfoFromLogs(logs);
+      const logError = extractErrorFromLogs(logs);
       const step: ScrapeRunStep = {
         store,
         startedAt: startedAtDate.toISOString(),
@@ -163,10 +243,12 @@ function runScraperStep(
         status: exitCode === 0 ? "success" : "failed",
         exitCode,
         command: [command, ...args].join(" "),
-        logs,
+        logs: trimLogs(logs),
         finalInfo,
         errorMessage:
-          exitCode === 0 ? undefined : `Step failed with exit code ${exitCode}`,
+          exitCode === 0
+            ? undefined
+            : logError || `Step failed with exit code ${exitCode}`,
       };
 
       resolve(step);
@@ -187,12 +269,10 @@ function extractFinalInfoFromLogs(
   | undefined {
   const joined = logs.join("\n");
 
-  // productService format (legacy): "Created: X, Updated: Y, Price cleared: P, Total: Z"
   const createdUpdatedClearedTotal = joined.match(
     /Created:\s*(\d+),\s*Updated:\s*(\d+),\s*Price cleared:\s*(\d+),\s*Total:\s*(\d+)/i,
   );
 
-  // productService availability format (legacy)
   const createdUpdatedMissingHidden = joined.match(
     /Created:\s*(\d+),\s*Updated:\s*(\d+),\s*Missing marked:\s*(\d+),\s*Hidden \(14d\+\):\s*(\d+),\s*Total:\s*(\d+)/i,
   );
@@ -201,38 +281,35 @@ function extractFinalInfoFromLogs(
     /Product updated:\s*(\d+),\s*NewProducts created:\s*(\d+),\s*NewProducts updated:\s*(\d+),\s*Missing marked:\s*(\d+),\s*Hidden \(14d\+\):\s*(\d+),\s*Products in DB:\s*(\d+)/i,
   );
 
-  // Legacy productService format: "Created: X, Updated: Y, Total: Z"
   const createdUpdatedTotal = joined.match(
     /Created:\s*(\d+),\s*Updated:\s*(\d+),\s*Total:\s*(\d+)/i,
   );
 
-  // idea persist (NewProducts staging)
   const ideaPersistNewProducts = joined.match(
     /Scraped\s*(\d+)\s*rows\s*[^\d]*(\d+)\s*new \(NewProducts\),\s*(\d+)\s*NewProducts updated,\s*(\d+)\s*Product updates/i,
   );
 
-  // idea persist (availability — legacy)
   const ideaPersistAvail = joined.match(
     /Scraped\s*(\d+)\s*rows\s*[^\d]*(\d+)\s*new,\s*(\d+)\s*price updates,\s*(\d+)\s*missing this run,\s*(\d+)\s*hidden \(14d\+\),\s*(\d+)\s*products in DB/i,
   );
 
-  // idea persist (with price cleared — legacy)
   const ideaPersistNew = joined.match(
     /Scraped\s*(\d+)\s*rows\s*[^\d]*(\d+)\s*new,\s*(\d+)\s*price updates,\s*(\d+)\s*price cleared,\s*(\d+)\s*products in DB/i,
   );
 
-  // idea persist legacy
   const ideaPersist = joined.match(
     /Scraped\s*(\d+)\s*rows\s*[^\d]*(\d+)\s*new,\s*(\d+)\s*price updates,\s*(\d+)\s*products in DB/i,
   );
 
-  // Generic scrape totals:
   const disCollected = joined.match(/\[DIS\]\s*Total collected:\s*(\d+)/i);
   const maxiCollected = joined.match(/Total products collected:\s*(\d+)/i);
   const univerexportCollected = joined.match(
     /\[Univerexport\]\s*Total collected:\s*(\d+)/i,
   );
-  const zlatanTragCollected = joined.match(/\[Zlatan Trag\]\s*Total collected:\s*(\d+)/i);
+  const asCollected = joined.match(/\[AS\]\s*Total collected:\s*(\d+)/i);
+  const zlatanTragCollected = joined.match(
+    /\[Zlatan Trag\]\s*Total collected:\s*(\d+)/i,
+  );
 
   const info: {
     scraped?: number;
@@ -298,6 +375,10 @@ function extractFinalInfoFromLogs(
     info.scraped = Number(univerexportCollected[1]);
   }
 
+  if (info.scraped == null && asCollected) {
+    info.scraped = Number(asCollected[1]);
+  }
+
   if (info.scraped == null && zlatanTragCollected) {
     info.scraped = Number(zlatanTragCollected[1]);
   }
@@ -320,7 +401,7 @@ function finalizeRun(run: ScrapeRun): ScrapeRun {
   const failedSteps = run.steps.length - successfulSteps;
 
   let status: RunStatus = "success";
-  if (failedSteps === run.steps.length) status = "failed";
+  if (run.steps.length === 0 || failedSteps === run.steps.length) status = "failed";
   else if (failedSteps > 0) status = "partial";
 
   return {
@@ -336,11 +417,156 @@ function finalizeRun(run: ScrapeRun): ScrapeRun {
   };
 }
 
+async function readRunsFromFile(): Promise<ScrapeRun[]> {
+  try {
+    const raw = await fs.readFile(RUNS_FILE_PATH, "utf-8");
+    const parsed = JSON.parse(raw) as { runs?: ScrapeRun[] };
+    return parsed.runs ?? [];
+  } catch {
+    return [];
+  }
+}
+
+async function writeRunsFileBackup(runs: ScrapeRun[]): Promise<void> {
+  try {
+    await fs.mkdir(path.dirname(RUNS_FILE_PATH), { recursive: true });
+    await fs.writeFile(
+      RUNS_FILE_PATH,
+      JSON.stringify({ runs: runs.slice(0, MAX_RUNS_TO_KEEP) }, null, 2),
+      "utf-8",
+    );
+  } catch (err) {
+    console.warn("[SCRAPE] Failed to write local scrape-runs.json backup:", err);
+  }
+}
+
+async function migrateFileRunsToDbIfNeeded(): Promise<void> {
+  if (fileMigratedToDb) return;
+  fileMigratedToDb = true;
+
+  try {
+    const dbCount = await prisma.scrapeRunRecord.count();
+    if (dbCount > 0) return;
+
+    const fileRuns = await readRunsFromFile();
+    if (fileRuns.length === 0) return;
+
+    console.log(
+      `[SCRAPE] Migrating ${fileRuns.length} local scrape runs into Neon…`,
+    );
+    for (const run of fileRuns.slice(0, MAX_RUNS_TO_KEEP)) {
+      await prisma.scrapeRunRecord.upsert({
+        where: { id: run.id },
+        create: {
+          id: run.id,
+          trigger: run.trigger,
+          status: run.status,
+          startedAt: new Date(run.startedAt),
+          finishedAt: run.finishedAt ? new Date(run.finishedAt) : null,
+          durationMs: run.durationMs ?? null,
+          payload: run as unknown as Prisma.InputJsonValue,
+        },
+        update: {
+          status: run.status,
+          finishedAt: run.finishedAt ? new Date(run.finishedAt) : null,
+          durationMs: run.durationMs ?? null,
+          payload: run as unknown as Prisma.InputJsonValue,
+        },
+      });
+    }
+    console.log("[SCRAPE] Local → Neon migration done.");
+  } catch (err) {
+    console.warn("[SCRAPE] Could not migrate local scrape runs to Neon:", err);
+  }
+}
+
+async function persistRun(run: ScrapeRun): Promise<void> {
+  await prisma.scrapeRunRecord.upsert({
+    where: { id: run.id },
+    create: {
+      id: run.id,
+      trigger: run.trigger,
+      status: run.status,
+      startedAt: new Date(run.startedAt),
+      finishedAt: run.finishedAt ? new Date(run.finishedAt) : null,
+      durationMs: run.durationMs ?? null,
+      payload: run as unknown as Prisma.InputJsonValue,
+    },
+    update: {
+      status: run.status,
+      finishedAt: run.finishedAt ? new Date(run.finishedAt) : null,
+      durationMs: run.durationMs ?? null,
+      payload: run as unknown as Prisma.InputJsonValue,
+    },
+  });
+
+  const existing = await readRuns();
+  const next = [run, ...existing.filter((r) => r.id !== run.id)].slice(
+    0,
+    MAX_RUNS_TO_KEEP,
+  );
+  await writeRunsFileBackup(next);
+
+  const overflow = await prisma.scrapeRunRecord.findMany({
+    orderBy: { startedAt: "desc" },
+    skip: MAX_RUNS_TO_KEEP,
+    select: { id: true },
+  });
+  if (overflow.length > 0) {
+    await prisma.scrapeRunRecord.deleteMany({
+      where: { id: { in: overflow.map((r) => r.id) } },
+    });
+  }
+}
+
+async function readRuns(): Promise<ScrapeRun[]> {
+  await migrateFileRunsToDbIfNeeded();
+  const rows = await prisma.scrapeRunRecord.findMany({
+    orderBy: { startedAt: "desc" },
+    take: MAX_RUNS_TO_KEEP,
+  });
+  return rows.map((row) => row.payload as unknown as ScrapeRun);
+}
+
+function collectProblemsFromRuns(runs: ScrapeRun[], limit = 20): ScrapeProblem[] {
+  const problems: ScrapeProblem[] = [];
+  for (const run of runs) {
+    if (run.status === "success") continue;
+    for (const step of run.steps) {
+      if (step.status !== "failed") continue;
+      problems.push({
+        runId: run.id,
+        trigger: run.trigger,
+        store: step.store,
+        status: step.status,
+        finishedAt: step.finishedAt || run.finishedAt,
+        errorMessage:
+          step.errorMessage ||
+          extractErrorFromLogs(step.logs || []) ||
+          `Exit code ${step.exitCode}`,
+      });
+      if (problems.length >= limit) return problems;
+    }
+  }
+  return problems;
+}
+
 export async function runAllCompleteScrapers(
   trigger: "manual" | "scheduled",
+  stores?: ScrapeStore[],
 ): Promise<{ ok: boolean; reason?: string; run?: ScrapeRun }> {
   if (isRunInProgress) {
     return { ok: false, reason: "A scraping run is already in progress." };
+  }
+
+  const selectedStores = stores?.length
+    ? stores
+    : SCRAPER_STEPS.map((s) => s.store);
+  const stepsToRun = SCRAPER_STEPS.filter((s) =>
+    selectedStores.includes(s.store),
+  );
+  if (stepsToRun.length === 0) {
+    return { ok: false, reason: "No matching scrapers for requested stores." };
   }
 
   isRunInProgress = true;
@@ -351,6 +577,7 @@ export async function runAllCompleteScrapers(
     startedAt: new Date().toISOString(),
     currentStepLogs: [],
     completedSteps: [],
+    plannedStores: stepsToRun.map((s) => s.store),
   };
 
   const run: ScrapeRun = {
@@ -363,13 +590,19 @@ export async function runAllCompleteScrapers(
   };
 
   try {
-    for (const step of SCRAPER_STEPS) {
+    for (const step of stepsToRun) {
       if (activeRunLiveState) {
         activeRunLiveState.currentStore = step.store;
-        activeRunLiveState.currentCommand = [step.command, ...step.args].join(" ");
+        activeRunLiveState.currentCommand = [step.command, ...step.args].join(
+          " ",
+        );
         activeRunLiveState.currentStepStartedAt = new Date().toISOString();
         activeRunLiveState.currentStepLogs = [];
       }
+
+      console.log(
+        `[SCRAPE] Starting ${step.store} (${trigger}) — ${[step.command, ...step.args].join(" ")}`,
+      );
 
       const result = await runScraperStep(
         step.store,
@@ -390,11 +623,27 @@ export async function runAllCompleteScrapers(
       if (activeRunLiveState) {
         activeRunLiveState.completedSteps.push(result);
       }
+
+      if (result.status === "failed") {
+        console.error(
+          `[SCRAPE] ${step.store} FAILED (exit ${result.exitCode}): ${result.errorMessage || "unknown"}`,
+        );
+      } else {
+        console.log(
+          `[SCRAPE] ${step.store} OK in ${(result.durationMs / 1000).toFixed(1)}s`,
+        );
+      }
     }
 
     const doneRun = finalizeRun(run);
-    const existingRuns = await readRuns();
-    await writeRuns([doneRun, ...existingRuns]);
+    await persistRun(doneRun);
+
+    if (doneRun.summary.failedSteps > 0) {
+      console.error(
+        `[SCRAPE] Run ${doneRun.id} finished with problems: ${doneRun.summary.failedSteps}/${doneRun.summary.totalSteps} failed`,
+      );
+    }
+
     return { ok: true, run: doneRun };
   } catch (error) {
     const failedRun = finalizeRun({
@@ -402,7 +651,7 @@ export async function runAllCompleteScrapers(
       steps: [
         ...run.steps,
         {
-          store: "Idea",
+          store: stepsToRun[0]?.store ?? "Idea",
           startedAt: new Date().toISOString(),
           finishedAt: new Date().toISOString(),
           durationMs: 0,
@@ -414,10 +663,14 @@ export async function runAllCompleteScrapers(
         },
       ],
     });
-    const existingRuns = await readRuns();
-    await writeRuns([failedRun, ...existingRuns]);
+    try {
+      await persistRun(failedRun);
+    } catch (persistErr) {
+      console.error("[SCRAPE] Failed to persist failed run:", persistErr);
+    }
     return { ok: false, reason: "Unhandled run failure", run: failedRun };
   } finally {
+    await refreshHomeShelvesAfterScrape();
     isRunInProgress = false;
     activeRunLiveState = null;
   }
@@ -427,9 +680,11 @@ export async function getScrapeRuns(): Promise<ScrapeRun[]> {
   return readRuns();
 }
 
-export function getScrapeStatus(): {
+export async function getScrapeStatus(): Promise<{
   isRunning: boolean;
   scheduled: string;
+  stores: Array<{ store: ScrapeStore; command: string }>;
+  recentProblems: ScrapeProblem[];
   activeRun: null | {
     runId: string;
     trigger: "manual" | "scheduled";
@@ -439,11 +694,22 @@ export function getScrapeStatus(): {
     currentStepStartedAt?: string;
     currentStepLogs: string[];
     completedSteps: ScrapeRunStep[];
+    plannedStores: ScrapeStore[];
   };
-} {
+}> {
+  let recentProblems: ScrapeProblem[] = [];
+  try {
+    const runs = await readRuns();
+    recentProblems = collectProblemsFromRuns(runs.slice(0, 10));
+  } catch (err) {
+    console.warn("[SCRAPE] Could not load recent problems:", err);
+  }
+
   return {
     isRunning: isRunInProgress,
-    scheduled: "Daily at 05:00 Europe/Belgrade",
+    scheduled: "Daily at 05:00 Europe/Belgrade, then home shelves",
+    stores: listCompleteScraperStores(),
+    recentProblems,
     activeRun: activeRunLiveState,
   };
 }
@@ -459,7 +725,6 @@ export function initScrapeSchedule(): void {
     `[SCRAPE_SCHEDULER] Registering cron "${expression}" tz=${timezone} (now=${new Date().toISOString()})`,
   );
 
-  // 05:00 every day in Serbian timezone.
   const task = cron.schedule(
     expression,
     async () => {
@@ -472,6 +737,13 @@ export function initScrapeSchedule(): void {
           console.error(
             "[SCRAPE_SCHEDULER] Scheduled run skipped/failed:",
             result.reason,
+          );
+        } else if (result.run && result.run.summary.failedSteps > 0) {
+          console.error(
+            "[SCRAPE_SCHEDULER] Scheduled run partial/failed:",
+            result.run.status,
+            result.run.id,
+            collectProblemsFromRuns([result.run]),
           );
         } else {
           console.log(
@@ -492,4 +764,6 @@ export function initScrapeSchedule(): void {
   console.log(
     `[SCRAPE_SCHEDULER] Registered OK (task=${(task as { name?: string }).name ?? "ok"})`,
   );
+
+  void migrateFileRunsToDbIfNeeded();
 }

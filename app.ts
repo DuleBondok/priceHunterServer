@@ -53,6 +53,8 @@ import {
   getScrapeRuns,
   getScrapeStatus,
   initScrapeSchedule,
+  listCompleteScraperStores,
+  resolveScrapeStores,
   runAllCompleteScrapers,
 } from "./scrapeOrchestrator";
 import { getHomeShelvesForServe } from "./homeShelves";
@@ -1004,7 +1006,16 @@ app.get("/api/scrape-dis", async (req: Request, res:Response) => {
 });
 
 app.get("/api/scraping/status", async (_req: Request, res: Response) => {
-  res.json(getScrapeStatus());
+  try {
+    res.json(await getScrapeStatus());
+  } catch (error) {
+    console.error("Failed to load scraping status:", error);
+    res.status(500).json({ error: "Failed to load scraping status" });
+  }
+});
+
+app.get("/api/scraping/stores", async (_req: Request, res: Response) => {
+  res.json({ stores: listCompleteScraperStores() });
 });
 
 app.get("/api/scraping/runs", async (_req: Request, res: Response) => {
@@ -1017,9 +1028,10 @@ app.get("/api/scraping/runs", async (_req: Request, res: Response) => {
   }
 });
 
-app.post("/api/scraping/run-now", async (_req: Request, res: Response) => {
+app.post("/api/scraping/run-now", async (req: Request, res: Response) => {
   try {
-    if (getScrapeStatus().isRunning) {
+    const status = await getScrapeStatus();
+    if (status.isRunning) {
       res.status(409).json({
         success: false,
         message: "A scrape run is already in progress",
@@ -1027,15 +1039,46 @@ app.post("/api/scraping/run-now", async (_req: Request, res: Response) => {
       return;
     }
 
+    let stores;
+    try {
+      const body = (req.body ?? {}) as {
+        store?: string;
+        stores?: string | string[];
+      };
+      const raw =
+        body.stores != null
+          ? body.stores
+          : body.store != null
+            ? body.store
+            : undefined;
+      stores = resolveScrapeStores(raw);
+    } catch (err) {
+      res.status(400).json({
+        success: false,
+        message: err instanceof Error ? err.message : "Invalid store",
+      });
+      return;
+    }
+
     // Reply first, then start work — otherwise Chrome OOM can kill the
     // process before the browser gets a response ("Failed to fetch").
-    res.status(202).json({ success: true, started: true });
+    res.status(202).json({
+      success: true,
+      started: true,
+      stores,
+    });
 
     const start = () => {
-      void runAllCompleteScrapers("manual")
+      void runAllCompleteScrapers("manual", stores)
         .then((result) => {
           if (!result.ok) {
             console.error("Manual scrape finished with failure:", result.reason);
+          } else if (result.run && result.run.summary.failedSteps > 0) {
+            console.error(
+              "Manual scrape finished with step failures:",
+              result.run.id,
+              result.run.summary,
+            );
           }
         })
         .catch((error) => {
