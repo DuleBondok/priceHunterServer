@@ -601,13 +601,16 @@ app.get("/api/admin/image-manager/search", async (req: Request, res: Response) =
     }
 
     if (and.length === 0) {
-      res.json({ products: [] });
+      res.json({ products: [], total: 0 });
       return;
     }
 
+    // Category/brand browse: return the full set. Free-text search stays capped.
+    const take = qRaw ? 100 : undefined;
+
     const products = await prisma.standardizedProduct.findMany({
       where: { AND: and },
-      take: 50,
+      ...(take != null ? { take } : {}),
       select: {
         id: true,
         name: true,
@@ -618,7 +621,7 @@ app.get("/api/admin/image-manager/search", async (req: Request, res: Response) =
       orderBy: { id: "asc" },
     });
 
-    res.json({ products });
+    res.json({ products, total: products.length });
   } catch (error) {
     console.error("Error searching image manager products:", error);
     res.status(500).json({ message: "Internal server error" });
