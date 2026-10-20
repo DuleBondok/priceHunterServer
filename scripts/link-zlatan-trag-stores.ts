@@ -6,7 +6,7 @@ import "dotenv/config";
 import prisma from "../prismaClient";
 import {
   matchZlatanTragOrg,
-  ZLATAN_TRAG_NIS_LOCATIONS,
+  ZLATAN_TRAG_LOCATIONS,
   ZLATAN_TRAG_STORE_NAME,
 } from "../scrapers/zlatanTragLocations";
 
@@ -48,7 +48,7 @@ async function main() {
   });
   console.log(`[post] linked=${linked} unmatched=${skipped}`);
   console.log("mapped", withCode);
-  const expected = ZLATAN_TRAG_NIS_LOCATIONS.map((l) => String(l.org));
+  const expected = ZLATAN_TRAG_LOCATIONS.map((l) => String(l.org));
   const have = new Set(withCode.map((s) => s.storeCode));
   const missing = expected.filter((c) => !have.has(c));
   if (missing.length) console.log("missing org codes in Store:", missing);

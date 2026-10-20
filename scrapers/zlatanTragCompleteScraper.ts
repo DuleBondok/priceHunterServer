@@ -5,6 +5,7 @@ import { normalizeDiscountPair } from "../utils/normalizeDiscountPrice";
 import { formatPriceRsd } from "./univerexportPriceUtils";
 import { zlatanTragCategoryFor } from "./zlatanTragCategories";
 import {
+  ZLATAN_TRAG_LOCATIONS,
   ZLATAN_TRAG_ORGS as DEFAULT_ZLATAN_TRAG_ORGS,
   ZLATAN_TRAG_STORE_NAME,
 } from "./zlatanTragLocations";
@@ -23,10 +24,13 @@ async function resolveOrgsToScrape(): Promise<number[]> {
     where: { name: STORE_NAME, storeCode: { not: null } },
     select: { storeCode: true },
   });
+  const skip = new Set(
+    ZLATAN_TRAG_LOCATIONS.filter((l) => l.scrape === false).map((l) => l.org),
+  );
   const codes = new Set(DEFAULT_ZLATAN_TRAG_ORGS);
   for (const row of fromStores) {
     const n = Number(row.storeCode);
-    if (Number.isInteger(n) && n > 0) codes.add(n);
+    if (Number.isInteger(n) && n > 0 && !skip.has(n)) codes.add(n);
   }
   return [...codes].sort((a, b) => a - b);
 }
@@ -140,6 +144,10 @@ export async function scrapeZlatanTragOrg(org: number): Promise<ZlatanTragRow[]>
   const rows: ZlatanTragRow[] = [];
   for (let page = 1; ; page++) {
     const pageRows = parseListingHtml(await fetchPageWithRetry(org, page), org);
+    if (page === 1 && pageRows.length === 0) {
+      console.warn(`[Zlatan Trag] org ${org}: no articles on proveracena — skipped`);
+      return [];
+    }
     rows.push(...pageRows);
     if (pageRows.length < PAGE_SIZE) break;
     await sleep(REQUEST_DELAY_MS);
