@@ -58,6 +58,7 @@ import {
   runAllCompleteScrapers,
 } from "./scrapeOrchestrator";
 import { getHomeShelvesForServe } from "./homeShelves";
+import { getStoreAvailability } from "./storeAvailability";
 import {
   assertAdminAuthConfigured,
   requireAdmin,
@@ -1759,6 +1760,48 @@ app.get(
 
 
 app.use('/api/search', searchRoute);
+
+/**
+ * Per-object availability. Zlatan Trag: Store.storeCode ↔ StoreLocationPrice.
+ *   GET /api/store-availability?productId=55146
+ *   GET /api/store-availability?standardizedProductId=123&chain=Zlatan%20Trag
+ */
+app.get("/api/store-availability", async (req: Request, res: Response) => {
+  try {
+    const productIdRaw = typeof req.query.productId === "string" ? req.query.productId : "";
+    const spRaw =
+      typeof req.query.standardizedProductId === "string"
+        ? req.query.standardizedProductId
+        : "";
+    const chain =
+      typeof req.query.chain === "string" ? req.query.chain.trim() : undefined;
+    const productId = productIdRaw ? Number(productIdRaw) : undefined;
+    const standardizedProductId = spRaw ? Number(spRaw) : undefined;
+    if (
+      (productId == null || !Number.isInteger(productId)) &&
+      (standardizedProductId == null || !Number.isInteger(standardizedProductId))
+    ) {
+      res.status(400).json({
+        error: "Provide productId or standardizedProductId",
+      });
+      return;
+    }
+    const result = await getStoreAvailability({
+      productId: productId != null && Number.isInteger(productId) ? productId : undefined,
+      standardizedProductId:
+        standardizedProductId != null && Number.isInteger(standardizedProductId)
+          ? standardizedProductId
+          : undefined,
+      chain,
+    });
+    res.json(result);
+  } catch (err) {
+    console.error("GET /api/store-availability failed:", err);
+    res.status(400).json({
+      error: err instanceof Error ? err.message : "Bad request",
+    });
+  }
+});
 
 /**
  * Catalog-home shelves for the mobile app (Popular / Najveća ušteda / Najveći popusti).

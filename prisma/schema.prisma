@@ -91,10 +91,16 @@ model Store {
   longitude    Float
   address      String
   city         String
+  /// Chain object code. Zlatan Trag: `org` on proveracena.zlatantrag.rs.
+  /// Join to StoreLocationPrice on (name, storeCode).
+  storeCode    String?
   /// Weekly opening hours as JSON. Keys: mon..sun.
   /// Day open: { "open": "08:00", "close": "21:00" }. Closed: null.
   /// Example: {"mon":{"open":"08:00","close":"21:00"},"tue":{"open":"08:00","close":"21:00"},"wed":{"open":"08:00","close":"21:00"},"thu":{"open":"08:00","close":"21:00"},"fri":{"open":"08:00","close":"21:00"},"sat":{"open":"08:00","close":"15:00"},"sun":null}
   openingHours Json?
+
+  @@unique([name, storeCode])
+  @@index([storeCode])
 }
 
 model ReceiptScan {

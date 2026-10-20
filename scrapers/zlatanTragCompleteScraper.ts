@@ -4,15 +4,32 @@ import { ProductData, normalizeName, saveProducts } from "../productService";
 import { normalizeDiscountPair } from "../utils/normalizeDiscountPrice";
 import { formatPriceRsd } from "./univerexportPriceUtils";
 import { zlatanTragCategoryFor } from "./zlatanTragCategories";
+import {
+  ZLATAN_TRAG_ORGS as DEFAULT_ZLATAN_TRAG_ORGS,
+  ZLATAN_TRAG_STORE_NAME,
+} from "./zlatanTragLocations";
 
-const STORE_NAME = "Zlatan Trag";
+const STORE_NAME = ZLATAN_TRAG_STORE_NAME;
 const BASE_URL = "https://proveracena.zlatantrag.rs/";
 /** Site caps perPage at 100. */
 const PAGE_SIZE = 100;
 const REQUEST_DELAY_MS = 300;
 
-/** Zlatan Trag objects (`org` query param) whose prices we track. */
-export const ZLATAN_TRAG_ORGS = [6, 47, 49, 53, 55, 56];
+/** Fallback if Store.storeCode is not filled yet. */
+export const ZLATAN_TRAG_ORGS = DEFAULT_ZLATAN_TRAG_ORGS;
+
+async function resolveOrgsToScrape(): Promise<number[]> {
+  const fromStores = await prisma.store.findMany({
+    where: { name: STORE_NAME, storeCode: { not: null } },
+    select: { storeCode: true },
+  });
+  const codes = new Set(DEFAULT_ZLATAN_TRAG_ORGS);
+  for (const row of fromStores) {
+    const n = Number(row.storeCode);
+    if (Number.isInteger(n) && n > 0) codes.add(n);
+  }
+  return [...codes].sort((a, b) => a - b);
+}
 
 export type ZlatanTragRow = {
   org: number;
@@ -192,8 +209,10 @@ export function mergeRowsToProducts(rows: ZlatanTragRow[]): {
 export async function scrapeZlatanTragCompleteProducts(options?: {
   dryRun?: boolean;
 }): Promise<ProductData[]> {
+  const orgs = await resolveOrgsToScrape();
+  console.log(`[Zlatan Trag] Scraping orgs: ${orgs.join(", ")}`);
   const allRows: ZlatanTragRow[] = [];
-  for (const org of ZLATAN_TRAG_ORGS) {
+  for (const org of orgs) {
     const rows = await scrapeZlatanTragOrg(org);
     console.log(`[Zlatan Trag] org ${org}: ${rows.length} rows`);
     allRows.push(...rows);
